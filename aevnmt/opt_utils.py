@@ -74,13 +74,15 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters):
             hparams.gen_lr,
             hparams.gen_l2_weight
         ),
-        "inf_z": get_optimizer(
+    }
+
+    if inf_z_parameters is not None:
+        optimizers["inf_z"] = get_optimizer(
             hparams.inf_z_optimizer,
             inf_z_parameters,
             hparams.inf_z_lr,
             hparams.inf_z_l2_weight
         )
-    }
 
     lr_schedulers = {
         "gen": get_lr_scheduler(
@@ -90,14 +92,16 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters):
             hparams.lr_reduce_cooldown,
             hparams.min_lr
         ),
-        "inf_z": get_lr_scheduler(
+    }
+
+    if inf_z_parameters is not None:
+        lr_schedulers["inf_z"] = get_lr_scheduler(
             optimizers["inf_z"],
             hparams.lr_reduce_factor,
             hparams.lr_reduce_patience,
             hparams.lr_reduce_cooldown,
             hparams.min_lr
         )
-    }
 
     return optimizers, lr_schedulers
 

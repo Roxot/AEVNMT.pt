@@ -18,6 +18,12 @@ class ConditionalNMT(nn.Module):
             self.output_matrix = nn.Parameter(torch.randn(tgt_vocab_size, decoder.hidden_size))
         self.dropout_layer = nn.Dropout(p=dropout)
 
+    def generative_parameters(self):
+        return self.parameters()
+
+    def inference_parameters(self):
+        return None
+
     def src_embed(self, x):
         x_embed = self.src_embedder(x)
         x_embed = self.dropout_layer(x_embed)

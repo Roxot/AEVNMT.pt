@@ -191,26 +191,6 @@ def compute_bleu(hypotheses, references, subword_token=None):
     # Compute the BLEU score.
     return sacrebleu.raw_corpus_bleu(hypotheses, [references]).score
 
-
-def print_model_summary(model, stdout=sys.stdout):
-    param_count_M_xy = model_parameter_count(model) / 1e6
-    print("Short summary:", file=stdout)
-    print(model, file=stdout)
-    print("\nAll parameters:", file=stdout)
-    for name, param in model.named_parameters():
-        print(f"{name} -- {param.size()}", file=stdout)
-    print(f"\nNumber of model parameters: {param_count_M_xy:.2f} M", file=stdout)
-    print(f"- generative parameters: {parameter_count(model.generative_parameters()) / 1e6}", file=stdout)
-    print(f"-- LM: {parameter_count(model.lm_parameters()) / 1e6}", file=stdout)
-    print(f"-- TM: {parameter_count(model.tm_parameters()) / 1e6}", file=stdout)
-    print(f"- inference parameters: {parameter_count(model.inference_parameters()) / 1e6}", file=stdout)
-    model.tm_parameters()
-    assert parameter_count(model.lm_parameters()) + parameter_count(model.tm_parameters()) == parameter_count(
-        model.generative_parameters())
-    assert parameter_count(model.generative_parameters()) + parameter_count(
-        model.inference_parameters()) == model_parameter_count(model)
-
-
 class StepCounter:
 
     def __init__(self):

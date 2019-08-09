@@ -9,8 +9,8 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from tensorboardX import SummaryWriter
 
-from aevnmt.train_utils import load_data, load_vocabularies, print_model_summary, gradient_norm
-from aevnmt.train_utils import CheckPoint
+from aevnmt.train_utils import load_data, load_vocabularies, gradient_norm
+from aevnmt.train_utils import CheckPoint, model_parameter_count
 from aevnmt.hparams import Hyperparameters
 from aevnmt.data import BucketingParallelDataLoader
 from aevnmt.data import PAD_TOKEN
@@ -113,7 +113,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 nn.utils.clip_grad_norm_(model.parameters(),
                                          hparams.max_gradient_norm)
             optimizers["gen"].step()
-            optimizers["inf_z"].step()
+            if "inf_z" in optimizers: optimizers["inf_z"].step()
 
             # Update statistics.
             num_tokens += (seq_len_x.sum() + seq_len_y.sum()).item()
@@ -138,7 +138,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
 
             # Zero the gradient buffer.
             optimizers["gen"].zero_grad()
-            optimizers["inf_z"].zero_grad()
+            if "inf_z" in optimizers: optimizers["inf_z"].zero_grad()
 
             # Run evaluation every evaluate_every steps if set.
             if hparams.evaluate_every > 0 and step > 0 and step % hparams.evaluate_every == 0:
@@ -198,8 +198,14 @@ def main():
     model = model.to(device)
 
     # Print information about the model.
+    param_count_M = model_parameter_count(model) / 1e6
     print("\n==== Model")
-    print_model_summary(model)
+    print("Short summary:")
+    print(model)
+    print("\nAll parameters:")
+    for name, param in model.named_parameters():
+        print(f"{name} -- {param.size()}")
+    print(f"\nNumber of model parameters: {param_count_M:.2f} M")
 
     # Initialize the model parameters, or load a checkpoint.
     if hparams.model_checkpoint is None:
