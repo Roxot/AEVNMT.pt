@@ -90,7 +90,7 @@ class AEVNMT(nn.Module):
                      self.encoder_init_layer.parameters(),
                      self.decoder_init_layer.parameters())
         if not self.tied_embeddings:
-            params = chain(params, self.output_matrix)
+            params = chain(params, [self.output_matrix])
         return params
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x):
