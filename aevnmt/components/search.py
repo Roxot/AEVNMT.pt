@@ -22,7 +22,7 @@ def ancestral_sample(decoder, tgt_embed_fn, generator_fn, hidden, encoder_output
     batch_size = seq_mask_x.size(0)
     prev_y = torch.full(size=[batch_size], fill_value=sos_idx, dtype=torch.long,
                         device=seq_mask_x.device)
-
+ 
     # Decode step-by-step by picking the maximum probability word
     # at each time step.
     predictions = []
@@ -41,7 +41,7 @@ def ancestral_sample(decoder, tgt_embed_fn, generator_fn, hidden, encoder_output
         log_prob_pred = py_x.log_prob(prediction)
         log_probs.append(torch.where(is_complete, torch.zeros_like(log_prob_pred), log_prob_pred))
         predictions.append(torch.where(is_complete, torch.full_like(prediction, pad_idx), prediction))
-        is_complete = is_complete | (prediction == eos_idx)
+        is_complete = is_complete | (prediction == eos_idx).byte()
 
     return {'sample': torch.cat(predictions, dim=1), 'log_probs': torch.cat(log_probs, dim=1)}
 
@@ -53,4 +53,12 @@ def greedy_decode(decoder, tgt_embed_fn, generator_fn, hidden, encoder_outputs,
         d = ancestral_sample(decoder, tgt_embed_fn, generator_fn, hidden, encoder_outputs,
                       encoder_final, seq_mask_x, sos_idx, eos_idx, pad_idx, max_len, greedy=True)
     # TODO: prepare other functions to expect a dictionary
+    return d['sample']
+
+def sampling_decode(decoder, tgt_embed_fn, generator_fn, hidden, encoder_outputs,
+                  encoder_final, seq_mask_x, sos_idx, eos_idx, pad_idx, max_len):
+    decoder.eval()
+    with torch.no_grad():
+        d = ancestral_sample(decoder, tgt_embed_fn, generator_fn, hidden, encoder_outputs,
+                      encoder_final, seq_mask_x, sos_idx, eos_idx, pad_idx, max_len, greedy=False)
     return d['sample']

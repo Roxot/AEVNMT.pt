@@ -5,7 +5,7 @@ from torch.distributions.normal import Normal
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
-from aevnmt.components import RNNEncoder, beam_search, greedy_decode, ancestral_sample
+from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode
 from aevnmt.models import AEVNMT, RNNLM
 from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
 
@@ -147,7 +147,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         hidden = model.init_decoder(encoder_outputs, encoder_final, z)
 
         if hparams.sample_decoding:
-            raw_hypothesis = ancestral_sample(model.decoder, model.tgt_embed,
+            raw_hypothesis = sampling_decode(model.decoder, model.tgt_embed,
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
                                            seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
