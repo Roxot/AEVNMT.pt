@@ -5,7 +5,7 @@ from torch.distributions.normal import Normal
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
-from aevnmt.components import RNNEncoder, beam_search, greedy_decode
+from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode
 from aevnmt.models import AEVNMT, RNNLM
 from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
 
@@ -91,7 +91,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
                                                   device, hparams)
 
     random_idx = np.random.choice(len(inputs))
-    print(f"direction = {title}\n" 
+    print(f"direction = {title}\n"
           f"validation perplexity = {val_ppl:,.2f}"
           f" -- validation NLL = {val_NLL:,.2f}"
           f" -- validation BLEU = {val_bleu:.2f}"
@@ -145,7 +145,14 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
 
         encoder_outputs, encoder_final = model.encode(x_in, seq_len_x, z)
         hidden = model.init_decoder(encoder_outputs, encoder_final, z)
-        if hparams.beam_width <= 1:
+
+        if hparams.sample_decoding:
+            raw_hypothesis = sampling_decode(model.decoder, model.tgt_embed,
+                                           model.generate, hidden,
+                                           encoder_outputs, encoder_final,
+                                           seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
+                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length)
+        elif hparams.beam_width <= 1:
             raw_hypothesis = greedy_decode(model.decoder, model.tgt_embed,
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
@@ -159,6 +166,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                          vocab_tgt[PAD_TOKEN], hparams.beam_width,
                                          hparams.length_penalty_factor,
                                          hparams.max_decoding_length)
+
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
 
