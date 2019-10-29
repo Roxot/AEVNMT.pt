@@ -142,7 +142,12 @@ def create_attention(hparams):
     if not hparams.attention in ["luong", "scaled_luong", "bahdanau"]:
         raise Exception(f"Unknown attention option: {hparams.attention}")
 
-    key_size = hparams.hidden_size * 2 if hparams.bidirectional else hparams.hidden_size
+    if hparams.encoder_style == "rnn":
+        key_size = hparams.hidden_size
+        if hparams.bidirectional:
+            key_size = key_size * 2
+    else:
+        key_size = hparams.emb_size
     query_size = hparams.hidden_size
 
     if "luong" in hparams.attention:
