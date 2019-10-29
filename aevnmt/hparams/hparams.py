@@ -45,6 +45,9 @@ options = {
                                            " initialize the embeddings.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+    "max_pooling_states":(bool, False, False, "Max-pool encoder states in the inference network instead of averaging them", 1),
+    "feed_z":(bool, False, False, "Concatenate z to the previous word embeddings at each timestep", 1),
+
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 2),

@@ -109,7 +109,7 @@ def create_decoder(attention, hparams):
                                dropout=hparams.dropout,
                                num_layers=hparams.num_dec_layers,
                                cell_type=hparams.cell_type,
-                               init_from_encoder_final=init_from_encoder_final)
+                               init_from_encoder_final=init_from_encoder_final,feed_z_size=hparams.latent_size if hparams.feed_z else 0)
     elif hparams.decoder_style == "luong":
         return LuongDecoder(emb_size=hparams.emb_size,
                             hidden_size=hparams.hidden_size,
@@ -117,7 +117,7 @@ def create_decoder(attention, hparams):
                             dropout=hparams.dropout,
                             num_layers=hparams.num_dec_layers,
                             cell_type=hparams.cell_type,
-                            init_from_encoder_final=init_from_encoder_final)
+                            init_from_encoder_final=init_from_encoder_final,feed_z_size=hparams.latent_size if hparams.feed_z else 0)
     else:
         raise Exception(f"Unknown decoder style: {hparams.decoder_style}")
 

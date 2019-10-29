@@ -9,12 +9,13 @@ from itertools import chain
 
 class InferenceNetwork(nn.Module):
 
-    def __init__(self, src_embedder, hidden_size, latent_size, bidirectional, num_enc_layers, cell_type):
+    def __init__(self, src_embedder, hidden_size, latent_size, bidirectional, num_enc_layers, cell_type,max_pool=False):
         """
         :param src_embedder: uses this embedder, but detaches its output from the graph as to not compute
                              gradients for it.
         """
         super().__init__()
+        self.max_pool=max_pool
         self.src_embedder = src_embedder
         emb_size = src_embedder.embedding_dim
         self.encoder = RNNEncoder(emb_size=emb_size,
@@ -29,7 +30,10 @@ class InferenceNetwork(nn.Module):
     def forward(self, x, seq_mask_x, seq_len_x):
         x_embed = self.src_embedder(x).detach()
         encoder_outputs, _ = self.encoder(x_embed, seq_len_x)
-        avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
+        if self.max_pool:
+            avg_encoder_output = encoder_outputs.max(dim=1)[0]
+        else:
+            avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
         return self.normal_layer(avg_encoder_output)
 
     def parameters(self, recurse=True):
@@ -41,8 +45,9 @@ class InferenceNetwork(nn.Module):
 class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
-                 pad_idx, dropout, tied_embeddings):
+                 pad_idx, dropout, tied_embeddings, feed_z=False,max_pool=False):
         super().__init__()
+        self.feed_z=feed_z
         self.latent_size = latent_size
         self.pad_idx = pad_idx
         self.encoder = encoder
@@ -64,7 +69,7 @@ class AEVNMT(nn.Module):
                                             latent_size=latent_size,
                                             bidirectional=encoder.bidirectional,
                                             num_enc_layers=encoder.num_layers,
-                                            cell_type=encoder.cell_type)
+                                            cell_type=encoder.cell_type,max_pool=max_pool)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -137,7 +142,7 @@ class AEVNMT(nn.Module):
         :param z: a sample of the latent variable
         """
         hidden = tile_rnn_hidden(self.lm_init_layer(z), self.language_model.rnn)
-        return self.language_model(x, hidden=hidden)
+        return self.language_model(x, hidden=hidden,z=z if self.feed_z else None)
 
     def forward(self, x, seq_mask_x, seq_len_x, y, z):
 
@@ -158,7 +163,7 @@ class AEVNMT(nn.Module):
             prev_y = y[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, att_weights = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs)
+                                                                encoder_outputs,z=z if self.feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
@@ -193,7 +198,7 @@ class AEVNMT(nn.Module):
             prev_y = y_in[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, _ = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs)
+                                                                encoder_outputs,z=z if self.feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
         # [max_length, batch_size, vocab_size]

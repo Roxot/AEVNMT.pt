@@ -35,7 +35,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
                   dropout=hparams.dropout,
                   num_layers=hparams.num_dec_layers,
                   cell_type=hparams.cell_type,
-                  tied_embeddings=hparams.tied_embeddings)
+                  tied_embeddings=hparams.tied_embeddings,
+                  feed_z_size=hparams.latent_size if hparams.feed_z else 0)
     encoder = RNNEncoder(emb_size=hparams.emb_size,
                          hidden_size=hparams.hidden_size,
                          bidirectional=hparams.bidirectional,
@@ -52,7 +53,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    language_model=rnnlm,
                    pad_idx=vocab_tgt[PAD_TOKEN],
                    dropout=hparams.dropout,
-                   tied_embeddings=hparams.tied_embeddings)
+                   tied_embeddings=hparams.tied_embeddings, feed_z=hparams.feed_z,max_pool=hparams.max_pooling_states)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
@@ -151,13 +152,13 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
                                            seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length)
+                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,z if hparams.feed_z else None)
         elif hparams.beam_width <= 1:
             raw_hypothesis = greedy_decode(model.decoder, model.tgt_embed,
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
                                            seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length)
+                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,z if hparams.feed_z else None)
         else:
             raw_hypothesis = beam_search(model.decoder, model.tgt_embed, model.generate,
                                          vocab_tgt.size(), hidden, encoder_outputs,
@@ -165,7 +166,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                          vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                                          vocab_tgt[PAD_TOKEN], hparams.beam_width,
                                          hparams.length_penalty_factor,
-                                         hparams.max_decoding_length)
+                                         hparams.max_decoding_length,z if hparams.feed_z else None)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
