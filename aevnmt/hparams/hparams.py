@@ -29,22 +29,29 @@ options = {
     "model_checkpoint": (str, None, False, "Checkpoint to restore the model from at"
                                            " the beginning of training.", 0),
 
-    # Model hyperparameters
+    # General model hyperparameters.
     "model_type": (str, "cond_nmt", False, "The type of model to train:"
-                                           " aevnmt", 1),
-    "cell_type": (str, "lstm", False, "The RNN cell type. rnn|gru|lstm", 1),
+                                           " cond_nmt|aevnmt", 1),
     "emb_size": (int, 32, False, "The source / target embedding size.", 1),
+    "emb_init_scale": (float, 0.01, False, "Scale of the Gaussian that is used to"
+                                           " initialize the embeddings.", 1),
     "hidden_size": (int, 32, False, "The size of the hidden layers.", 1),
     "latent_size": (int, 32, False, "The size of the latent variables.", 1),
     "num_enc_layers": (int, 1, False, "The number of encoder layers.", 1),
     "num_dec_layers": (int, 1, False, "The number of decoder layers.", 1),
-    "bidirectional": (bool, False, False, "Use a bidirectional encoder.", 1),
-    "attention": (str, "luong", False, "Attention type: luong|scaled_luong|bahdanau", 1),
-    "decoder_style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
-    "emb_init_scale": (float, 0.01, False, "Scale of the Gaussian that is used to"
-                                           " initialize the embeddings.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+    "encoder_style": (str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
+    "decoder_style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
+
+    # Transformer encoder / decoder hyperparameters.
+    "transformer_heads": (int, 8, False, "The number of transformer heads in that architecture", 1),
+    "transformer_hidden": (int, 2048, False, "The size of the hidden feedforward layer in the transformer", 1),
+
+    # RNN encoder / decoder hyperparameters.
+    "bidirectional": (bool, False, False, "Use a bidirectional encoder.", 1),
+    "cell_type": (str, "lstm", False, "The RNN cell type. rnn|gru|lstm", 1),
+    "attention": (str, "luong", False, "Attention type: luong|scaled_luong|bahdanau", 1),
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 2),

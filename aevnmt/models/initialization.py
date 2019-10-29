@@ -57,6 +57,11 @@ def initialize_model(model, pad_idx, cell_type, emb_init_scale, verbose=False):
                 n = 4 if cell_type == "lstm" else 3
                 xavier_uniform_n_(param.data, gain=xavier_gain, n=n)
 
+            # Use default initialization for the transformer.
+            elif "transformer" in name:
+                if verbose:
+                    print(f"Using default initialization for {name}")
+
             # For all other matrices just use Xavier uniform initialization.
             elif len(param) > 1:
                 if verbose:

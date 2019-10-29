@@ -36,12 +36,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                   num_layers=hparams.num_dec_layers,
                   cell_type=hparams.cell_type,
                   tied_embeddings=hparams.tied_embeddings)
-    encoder = RNNEncoder(emb_size=hparams.emb_size,
-                         hidden_size=hparams.hidden_size,
-                         bidirectional=hparams.bidirectional,
-                         dropout=hparams.dropout,
-                         num_layers=hparams.num_enc_layers,
-                         cell_type=hparams.cell_type)
+    encoder = create_encoder(hparams)
     attention = create_attention(hparams)
     decoder = create_decoder(attention, hparams)
     model = AEVNMT(tgt_vocab_size=vocab_tgt.size(),

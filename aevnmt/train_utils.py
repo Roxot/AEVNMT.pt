@@ -9,7 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from aevnmt.data import MemMappedCorpus, MemMappedParallelCorpus
 from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword_tokens
-from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder
+from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, TransformerEncoder, RNNEncoder
 
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
@@ -99,6 +99,23 @@ def load_vocabularies(hparams):
                                              max_size=hparams.max_vocab_size)
 
     return vocab_src, vocab_tgt
+
+def create_encoder(hparams):
+    if hparams.encoder_style == "rnn":
+        return RNNEncoder(emb_size=hparams.emb_size,
+                             hidden_size=hparams.hidden_size,
+                             bidirectional=hparams.bidirectional,
+                             dropout=hparams.dropout,
+                             num_layers=hparams.num_enc_layers,
+                             cell_type=hparams.cell_type)
+    elif hparams.encoder_style == "transformer":
+        return TransformerEncoder(input_size=hparams.emb_size,
+                                     num_heads=hparams.transformer_heads,
+                                     num_layers=hparams.num_enc_layers,
+                                     dim_ff=hparams.transformer_hidden,
+                                     dropout=hparams.dropout)
+    else:
+        raise Exception(f"Unknown encoder style: {hparams.encoder_style}")
 
 def create_decoder(attention, hparams):
     init_from_encoder_final = (hparams.model_type == "cond_nmt")
