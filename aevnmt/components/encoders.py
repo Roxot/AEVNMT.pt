@@ -45,14 +45,14 @@ class TransformerEncoder(nn.Module):
     An extremely simple wrapper around nn.TransformerEncoder that works in batch major.
     """
 
-    def __init__(self, input_size, num_heads, num_layers, dim_ff, dropout=0., activation="relu"):
+    def __init__(self, input_size, num_heads, num_layers, dim_ff, dropout=0.):
         super().__init__()
         self.pos_enc = PositionalEncoding(input_size, dropout)
         encoder_layer = nn.TransformerEncoderLayer(d_model=input_size,
                                                    nhead=num_heads,
                                                    dim_feedforward=dim_ff,
-                                                   dropout=dropout,
-                                                   activation=activation)
+                                                   dropout=dropout)
+                                                   
         self.transformer_enc = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.input_size = input_size
 
