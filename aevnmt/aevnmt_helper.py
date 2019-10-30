@@ -198,8 +198,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
         log_marginal_bow = 0.
         log_marginal_bow_tl = 0.
         total_KL = 0.
-        #n_samples = 10
-        n_samples = 1
+        n_samples = 10
         for sentences_x, sentences_y in val_dl:
             x_in, x_out, seq_mask_x, seq_len_x = create_batch(sentences_x, vocab_src, device)
             y_in, y_out, seq_mask_y, seq_len_y = create_batch(sentences_y, vocab_tgt, device)
