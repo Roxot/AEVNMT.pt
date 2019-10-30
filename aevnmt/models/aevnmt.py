@@ -68,6 +68,7 @@ class AEVNMT(nn.Module):
 
 
         self.bow_output_layer=None
+        self.bow_output_layer_tl=None
 
         if bow:
             self.bow_output_layer = nn.Linear(latent_size,
@@ -87,7 +88,10 @@ class AEVNMT(nn.Module):
     def generative_parameters(self):
         # TODO: separate the generative model into a GenerativeModel module
         #  within that module, have two modules, namely, LanguageModel and TranslationModel
-        return chain(self.lm_parameters(), self.tm_parameters())
+        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters())
+
+    def bow_parameters(self):
+        return chain( iter(()) if self.bow_output_layer is None else self.bow_output_layer.parameters()   , iter(()) if self.bow_output_layer_tl is None else self.bow_output_layer_tl.parameters()  )
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
