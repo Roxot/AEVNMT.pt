@@ -45,6 +45,7 @@ options = {
                                            " initialize the embeddings.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+    "bow_loss":(bool, False, False, "Add bag-of-words terms to the loss", 1),
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 2),
