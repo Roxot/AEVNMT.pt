@@ -41,7 +41,7 @@ class InferenceNetwork(nn.Module):
 class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
-                 pad_idx, dropout, tied_embeddings,bow=False):
+                 pad_idx, dropout, tied_embeddings,bow=False, bow_tl=False):
         super().__init__()
         self.latent_size = latent_size
         self.pad_idx = pad_idx
@@ -73,6 +73,8 @@ class AEVNMT(nn.Module):
         if bow:
             self.bow_output_layer = nn.Linear(latent_size,
                                               self.language_model.embedder.num_embeddings, bias=True)
+
+        if bow_tl:
             self.bow_output_layer_tl = nn.Linear(latent_size,
                                               self.tgt_embedder.num_embeddings, bias=True)
 
