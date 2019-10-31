@@ -172,6 +172,10 @@ def gradient_norm(model):
     total_norm = np.sqrt(total_norm)
     return total_norm
 
+def log_gradient_histograms(model, summary_writer, step):
+    for name, p in model.named_parameters():
+        summary_writer.add_histogram(f"train/{name}", p.grad.data, step)
+
 def attention_summary(src_labels, tgt_labels, att_weights, summary_writer, summary_name,
                       global_step):
     """

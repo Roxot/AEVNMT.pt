@@ -32,7 +32,8 @@ options = {
     # General model hyperparameters.
     "model_type": (str, "cond_nmt", False, "The type of model to train:"
                                            " cond_nmt|aevnmt", 1),
-    "emb_size": (int, 32, False, "The source / target embedding size.", 1),
+    "emb_size": (int, 32, False, "The source / target embedding size, this is also"
+                                 " the model size in the transformer architecture.", 1),
     "emb_init_scale": (float, 0.01, False, "Scale of the Gaussian that is used to"
                                            " initialize the embeddings.", 1),
     "hidden_size": (int, 32, False, "The size of the hidden layers.", 1),
@@ -76,17 +77,22 @@ options = {
     "max_gradient_norm": (float, 5.0, False, "The maximum gradient norm to clip the"
                                              " gradients to, to disable"
                                              " set <= 0.", 3),
+    "lr_scheduler": (str, "reduce_on_plateau", False, "The learning rate scheduler used: reduce_on_plateau |"
+                                                      " noam (transformers)", 3),
     "lr_reduce_factor": (float, 0.5, False, "The factor to reduce the learning rate"
                                             " with if no validation improvement is"
-                                            "  found.", 3),
+                                            "  found (all lr schedulers).", 3),
     "lr_reduce_patience": (int, 2, False, "The number of evaluations to wait for"
                                            " improvement of validation scores"
-                                           " before reducing the learning rate.", 3),
+                                           " before reducing the learning rate"
+                                           " (reduce_on_plateau scheduler).", 3),
     "lr_reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
                                           " checking for improvements after a"
-                                          " learning rate reduction.", 3),
+                                          " learning rate reduction"
+                                          " (reduce_on_plateau scheduler).", 3),
     "min_lr": (float, 1e-5, False, "The minimum learning rate the learning rate"
-                                   " scheduler can reduce to.", 3),
+                                   " scheduler can reduce to (reduce_on_plateau scheduler).", 3),
+    "lr_warmup": (int, 4000, False, "Learning rate warmup (noam_scheduler)", 3),
     "patience": (int, 5, False, "The number of evaluations to continue training for"
                                 " when an improvement has been found.", 3),
     "dropout": (float, 0., False, "The amount of dropout.", 3),
