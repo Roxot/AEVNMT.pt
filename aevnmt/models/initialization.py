@@ -34,8 +34,13 @@ def initialize_model(model, pad_idx, cell_type, emb_init_scale, verbose=False):
     with torch.no_grad():
         for name, param in model.named_parameters():
 
+            # Use default initialization for the transformer.
+            if "transformer" in name:
+                if verbose:
+                    print(f"Using default initialization for {name}")
+
             # Initialize embeddings from a 0-mean Gaussian with scale emb_init_scale.
-            if "embedder" in name:
+            elif "embedder" in name:
                 if verbose:
                     print(f"Initializing {name} with N(0, {emb_init_scale})")
                 nn.init.normal_(param, mean=0., std=emb_init_scale)

@@ -9,7 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from aevnmt.data import MemMappedCorpus, MemMappedParallelCorpus
 from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword_tokens
-from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder
+from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, TransformerEncoder, RNNEncoder
 
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
@@ -100,6 +100,23 @@ def load_vocabularies(hparams):
 
     return vocab_src, vocab_tgt
 
+def create_encoder(hparams):
+    if hparams.encoder_style == "rnn":
+        return RNNEncoder(emb_size=hparams.emb_size,
+                             hidden_size=hparams.hidden_size,
+                             bidirectional=hparams.bidirectional,
+                             dropout=hparams.dropout,
+                             num_layers=hparams.num_enc_layers,
+                             cell_type=hparams.cell_type)
+    elif hparams.encoder_style == "transformer":
+        return TransformerEncoder(input_size=hparams.emb_size,
+                                     num_heads=hparams.transformer_heads,
+                                     num_layers=hparams.num_enc_layers,
+                                     dim_ff=hparams.transformer_hidden,
+                                     dropout=hparams.dropout)
+    else:
+        raise Exception(f"Unknown encoder style: {hparams.encoder_style}")
+
 def create_decoder(attention, hparams):
     init_from_encoder_final = (hparams.model_type == "cond_nmt")
     if hparams.decoder_style == "bahdanau":
@@ -125,7 +142,12 @@ def create_attention(hparams):
     if not hparams.attention in ["luong", "scaled_luong", "bahdanau"]:
         raise Exception(f"Unknown attention option: {hparams.attention}")
 
-    key_size = hparams.hidden_size * 2 if hparams.bidirectional else hparams.hidden_size
+    if hparams.encoder_style == "rnn":
+        key_size = hparams.hidden_size
+        if hparams.bidirectional:
+            key_size = key_size * 2
+    else:
+        key_size = hparams.emb_size
     query_size = hparams.hidden_size
 
     if "luong" in hparams.attention:
@@ -149,6 +171,10 @@ def gradient_norm(model):
         total_norm += param_norm.item() ** 2
     total_norm = np.sqrt(total_norm)
     return total_norm
+
+def log_gradient_histograms(model, summary_writer, step):
+    for name, p in model.named_parameters():
+        summary_writer.add_histogram(f"train/{name}", p.grad.data, step)
 
 def attention_summary(src_labels, tgt_labels, att_weights, summary_writer, summary_name,
                       global_step):
