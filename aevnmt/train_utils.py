@@ -117,7 +117,8 @@ def create_decoder(attention, hparams):
                             dropout=hparams.dropout,
                             num_layers=hparams.num_dec_layers,
                             cell_type=hparams.cell_type,
-                            init_from_encoder_final=init_from_encoder_final,feed_z_size=hparams.latent_size if hparams.feed_z else 0)
+                            init_from_encoder_final=init_from_encoder_final,
+                            feed_z_size=hparams.latent_size if hparams.feed_z else 0)
     else:
         raise Exception(f"Unknown decoder style: {hparams.decoder_style}")
 
