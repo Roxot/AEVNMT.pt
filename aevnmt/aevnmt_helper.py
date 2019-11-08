@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from torch.distributions.normal import Normal
+from torch.distributions import Normal
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
 from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode
 from aevnmt.models import AEVNMT, RNNLM
+from aevnmt.dist import get_named_params
 from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
 
 from torch.utils.data import DataLoader
@@ -47,11 +48,14 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    language_model=rnnlm,
                    pad_idx=vocab_tgt[PAD_TOKEN],
                    dropout=hparams.dropout,
-                   tied_embeddings=hparams.tied_embeddings)
+                   tied_embeddings=hparams.tied_embeddings,
+                   prior_family=hparams.prior,
+                   prior_params=hparams.prior_params,
+                   posterior_family=hparams.posterior)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
-               hparams, step):
+               hparams, step, summary_writer=None):
 
     # Use q(z|x) for training to sample a z.
     qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
@@ -71,6 +75,19 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       free_nats=hparams.KL_free_nats,
                       KL_weight=KL_weight,
                       reduction="mean")
+
+    if summary_writer:
+        summary_writer.add_histogram("posterior/z", z, step)
+        for param_name, param_value in get_named_params(qz):
+            summary_writer.add_histogram("posterior/%s" % param_name, param_value, step)
+        pz = model.prior()
+        # This part is perhaps not necessary for a simple prior (e.g. Gaussian), 
+        #  but it's useful for more complex priors (e.g. mixtures and NFs)
+        prior_sample = pz.sample(torch.Size([z.size(0)]))
+        summary_writer.add_histogram("prior/z", prior_sample, step)
+        for param_name, param_value in get_named_params(pz):
+            summary_writer.add_histogram("prior/%s" % param_name, param_value, step)
+
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title='xy', summary_writer=None):
@@ -196,7 +213,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
 
             # Infer q(z|x) for this batch.
             qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
-            pz = model.prior().expand(qz.mean.size())
+            pz = model.prior()  #.expand(qz.mean.size())
             total_KL += torch.distributions.kl.kl_divergence(qz, pz).sum().item()
 
             # Take s importance samples from q(z|x):
@@ -222,8 +239,8 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_lm_prob = (seq_mask_x.type_as(log_lm_prob) * log_lm_prob).sum(dim=1)
 
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
-                log_pz = pz.log_prob(z).sum(dim=1) # [B, latent_size] -> [B]
-                log_qz = qz.log_prob(z).sum(dim=1)
+                log_pz = pz.log_prob(z) # [B, latent_size] -> [B]
+                log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
                 batch_log_marginals[s] = log_tm_prob + log_lm_prob + log_pz - log_qz

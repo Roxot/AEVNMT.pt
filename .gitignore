@@ -4,3 +4,5 @@
 *.pyc
 AEVNMT.pt.egg-info/
 .ipynb_checkpoints/
+# Linux
+.*.swp

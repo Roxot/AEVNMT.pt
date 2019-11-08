@@ -103,8 +103,10 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in = create_noisy_batch(
                 sentences_y, vocab_tgt, device,
                 word_dropout=hparams.word_dropout)
-            loss = train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
-                              y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, step)["loss"]
+            loss = train_step(
+                    model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
+                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, 
+                    step, summary_writer=summary_writer)["loss"]
 
             # Backpropagate and update gradients.
             loss.backward()

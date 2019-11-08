@@ -1,6 +1,37 @@
 import argparse
 import json
 
+
+class ListOfInts(list):
+
+    def __init__(self, values):
+        if isinstance(values, str):
+            values = (int(v) for v in values.split())
+        else:
+            values = (int(v) for v in values)
+        super(ListOfInts, self).__init__(values)
+
+
+class ListOfFloats(list):
+
+    def __init__(self, values):
+        if isinstance(values, str):
+            values = (float(v) for v in values.split())
+        else:
+            values = (float(v) for v in values)
+        super(ListOfFloats, self).__init__(values)
+
+
+class ListOfStrings(list):
+
+    def __init__(self, values):
+        if isinstance(values, str):
+            values = (str(v) for v in values.split())
+        else:
+            values = (str(v) for v in values)
+        super(ListOfStrings, self).__init__(values)
+
+
 options = {
     # Format: "option_name": (type, default_val, required, description, group)
     # `group` is for ordering purposes when printing.
@@ -42,6 +73,13 @@ options = {
     "num_dec_layers": (int, 1, False, "The number of decoder layers.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+
+    "prior": (str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)", 1),
+    "prior_params": (ListOfFloats, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
+        "beta (a: default 0.5, b: default 0.5), "
+        "mog (num_components: default 10, radius: default 10, scale: default 0.5)", 2),
+    "posterior": (str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 1),
+
     "encoder_style": (str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
     "decoder_style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
 
