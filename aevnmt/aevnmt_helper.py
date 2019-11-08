@@ -170,7 +170,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                          vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                                          vocab_tgt[PAD_TOKEN], hparams.beam_width,
                                          hparams.length_penalty_factor,
-                                         hparams.max_decoding_length,z if hparams.feed_z else None)
+                                         hparams.max_decoding_length,
+                                         z if hparams.feed_z else None)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
