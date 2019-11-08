@@ -154,7 +154,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
                                            seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,z if hparams.feed_z else None)
+                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,
+                                           z if hparams.feed_z else None)
         elif hparams.beam_width <= 1:
             raw_hypothesis = greedy_decode(model.decoder, model.tgt_embed,
                                            model.generate, hidden,
