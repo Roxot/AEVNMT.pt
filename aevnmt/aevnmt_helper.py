@@ -52,7 +52,9 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    language_model=rnnlm,
                    pad_idx=vocab_tgt[PAD_TOKEN],
                    dropout=hparams.dropout,
-                   tied_embeddings=hparams.tied_embeddings,bow=hparams.bow_loss,bow_tl=hparams.bow_loss_tl)
+                   tied_embeddings=hparams.tied_embeddings,
+                   bow=hparams.bow_loss,
+                   bow_tl=hparams.bow_loss_tl)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
