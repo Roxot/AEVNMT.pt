@@ -93,7 +93,17 @@ class AEVNMT(nn.Module):
         return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters())
 
     def bow_parameters(self):
-        return chain( iter(()) if self.bow_output_layer is None else self.bow_output_layer.parameters()   , iter(()) if self.bow_output_layer_tl is None else self.bow_output_layer_tl.parameters()  )
+        if self.bow_output_layer is None:
+            bow_params=iter(())
+        else:
+            bow_params=self.bow_output_layer.parameters()
+
+        if self.bow_output_layer_tl is None:
+            bow_params_tl=iter(())
+        else:
+            bow_params_tl=self.bow_output_layer_tl.parameters()
+
+        return chain( bow_params  , bow_params_tl   )
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
