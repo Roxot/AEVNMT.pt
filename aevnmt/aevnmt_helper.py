@@ -77,7 +77,9 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     loss = model.loss(tm_logits, lm_logits, y_out, x_out, qz,
                       free_nats=hparams.KL_free_nats,
                       KL_weight=KL_weight,
-                      reduction="mean",bow_logits=bow_logits,bow_logits_tl=bow_logits_tl)
+                      reduction="mean",
+                      bow_logits=bow_logits,
+                      bow_logits_tl=bow_logits_tl)
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title='xy', summary_writer=None):
