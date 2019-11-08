@@ -160,7 +160,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                                            model.generate, hidden,
                                            encoder_outputs, encoder_final,
                                            seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,z if hparams.feed_z else None)
+                                           vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,
+                                           z if hparams.feed_z else None)
         else:
             raw_hypothesis = beam_search(model.decoder, model.tgt_embed, model.generate,
                                          vocab_tgt.size(), hidden, encoder_outputs,
