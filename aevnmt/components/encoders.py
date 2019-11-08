@@ -4,6 +4,7 @@ import math
 
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .utils import rnn_creation_fn
+from .nli import DecomposableAttentionEncoder as NLIEncoder
 
 class RNNEncoder(nn.Module):
 
@@ -108,3 +109,4 @@ class PositionalEncoding(nn.Module):
 
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
+

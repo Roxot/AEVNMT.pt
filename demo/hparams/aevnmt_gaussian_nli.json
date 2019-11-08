@@ -45,6 +45,7 @@
     "prior": "gaussian",
     "prior_params": [0.0, 1.0], 
     "posterior": "gaussian", 
-    "inf_encoder_style": "rnn",  
-    "inf_conditioning": "x"
+    "inf_encoder_style": "nli",  
+    "inf_conditioning": "xy",
+    "criterion": "likelihood"
 }

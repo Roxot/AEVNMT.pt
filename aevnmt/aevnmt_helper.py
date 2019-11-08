@@ -8,7 +8,7 @@ from aevnmt.data import create_batch, batch_to_sentences
 from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode
 from aevnmt.models import AEVNMT, RNNLM
 from aevnmt.dist import get_named_params
-from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
+from .train_utils import create_attention, create_encoder, create_decoder, attention_summary, compute_bleu
 
 from torch.utils.data import DataLoader
 
@@ -51,14 +51,16 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    tied_embeddings=hparams.tied_embeddings,
                    prior_family=hparams.prior,
                    prior_params=hparams.prior_params,
-                   posterior_family=hparams.posterior)
+                   posterior_family=hparams.posterior,
+                   inf_encoder_style=hparams.inf_encoder_style,
+                   inf_conditioning=hparams.inf_conditioning)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
                hparams, step, summary_writer=None):
 
     # Use q(z|x) for training to sample a z.
-    qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
+    qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
     z = qz.rsample()
 
     # Compute the translation and language model logits.
@@ -134,8 +136,8 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
         with torch.no_grad():
             val_sentence_x, val_sentence_y = val_data[0]
             x_in, _, seq_mask_x, seq_len_x = create_batch([val_sentence_x], vocab_src, device)
-            y_in, y_out, _, _ = create_batch([val_sentence_y], vocab_tgt, device)
-            z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x).sample()
+            y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
+            z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
             _, _, att_weights = model(x_in, seq_mask_x, seq_len_x, y_in, z)
             att_weights = att_weights.squeeze().cpu().numpy()
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
@@ -152,7 +154,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         x_in, _, seq_mask_x, seq_len_x = create_batch(input_sentences, vocab_src, device)
 
         # For translation we use the approximate posterior mean.
-        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
+        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, 
+                y=x_in, seq_mask_y=seq_mask_x, seq_len_y=seq_len_x) # TODO: here we need a prediction net!
         z = qz.mean if deterministic else qz.sample()
 
         encoder_outputs, encoder_final = model.encode(x_in, seq_len_x, z)
@@ -212,7 +215,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
             y_in, y_out, seq_mask_y, seq_len_y = create_batch(sentences_y, vocab_tgt, device)
 
             # Infer q(z|x) for this batch.
-            qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
+            qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
             pz = model.prior()  #.expand(qz.mean.size())
             total_KL += torch.distributions.kl.kl_divergence(qz, pz).sum().item()
 

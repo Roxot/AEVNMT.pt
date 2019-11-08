@@ -4,53 +4,21 @@ import torch.nn.functional as F
 from torch.distributions import Independent
 
 from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
+from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
 from aevnmt.dist import get_named_params
 from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from probabll.distributions import MixtureOfGaussians
+from .inference import get_inference_encoder
+from .inference import InferenceNetwork
 
 from itertools import chain
 
-class InferenceNetwork(nn.Module):
-
-    def __init__(self, family: str, src_embedder, hidden_size, latent_size, bidirectional, num_enc_layers, cell_type):
-        """
-        :param src_embedder: uses this embedder, but detaches its output from the graph as to not compute
-                             gradients for it.
-        """
-        super().__init__()
-        self.family = family
-        self.src_embedder = src_embedder
-        emb_size = src_embedder.embedding_dim
-        self.encoder = RNNEncoder(emb_size=emb_size,
-                                  hidden_size=hidden_size,
-                                  bidirectional=bidirectional,
-                                  dropout=0.,
-                                  num_layers=num_enc_layers,
-                                  cell_type=cell_type)
-        encoding_size = hidden_size if not bidirectional else hidden_size * 2
-        if family == "gaussian":
-            self.conditioner = NormalLayer(encoding_size, hidden_size, latent_size)
-        elif family == "kumaraswamy":
-            self.conditioner = KumaraswamyLayer(encoding_size, hidden_size, latent_size)
-        else:
-            raise NotImplementedError("I cannot design %s posterior approximation." % family)
-
-    def forward(self, x, seq_mask_x, seq_len_x) -> torch.distributions.Distribution:
-        x_embed = self.src_embedder(x).detach()
-        encoder_outputs, _ = self.encoder(x_embed, seq_len_x)
-        avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
-        return self.conditioner(avg_encoder_output)
-
-    def parameters(self, recurse=True):
-        return chain(self.encoder.parameters(recurse=recurse), self.conditioner.parameters(recurse=recurse))
-
-    def named_parameters(self, prefix='', recurse=True):
-        return chain(self.encoder.named_parameters(prefix='', recurse=True), self.conditioner.named_parameters(prefix='', recurse=True), )
 
 class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
-            pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str):
+            pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
+            inf_encoder_style: str, inf_conditioning: str): 
         super().__init__()
         self.latent_size = latent_size
         self.pad_idx = pad_idx
@@ -70,12 +38,24 @@ class AEVNMT(nn.Module):
                                            nn.Tanh())
         self.inf_network = InferenceNetwork(
             family=posterior_family,
-            src_embedder=self.language_model.embedder,
-            hidden_size=encoder.hidden_size,
             latent_size=latent_size,
-            bidirectional=encoder.bidirectional,
-            num_enc_layers=encoder.num_layers,
-            cell_type=encoder.cell_type)
+            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder??? 
+            hidden_size=encoder.hidden_size,
+            encoder=get_inference_encoder(
+                encoder_style=inf_encoder_style,
+                conditioning_context=inf_conditioning,
+                embedder_x=self.language_model.embedder,
+                embedder_y=self.tgt_embedder,
+                hidden_size=encoder.hidden_size,
+                rnn_bidirectional=encoder.bidirectional,
+                rnn_num_layers=encoder.num_layers,
+                rnn_cell_type=encoder.cell_type,
+                transformer_heads=8,  # TODO: create a hyperparameter for this
+                transformer_layers=8, # TODO: create a hyperparameter for this
+                nli_shared_size=self.language_model.embedder.embedding_dim,
+                nli_max_distance=20,  # TODO: create a hyperaparameter for this
+                dropout=dropout)
+            )
 
         # This is done because the prior parameters are not considered trainable
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -144,11 +124,11 @@ class AEVNMT(nn.Module):
             params = chain(params, [self.output_matrix])
         return params
 
-    def approximate_posterior(self, x, seq_mask_x, seq_len_x):
+    def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
-        Returns an approximate posterior distribution q(z|x).
+        Returns an approximate posterior distribution q(z|x, y).
         """
-        return self.inf_network(x, seq_mask_x, seq_len_x)
+        return self.inf_network(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
 
     def prior(self) -> torch.distributions.Distribution:
         if self.prior_family == "gaussian":
