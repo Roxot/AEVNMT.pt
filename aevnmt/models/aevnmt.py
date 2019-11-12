@@ -18,7 +18,7 @@ class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
-            inf_encoder_style: str, inf_conditioning: str, bow=False, bow_tl=False): 
+            inf_encoder_style: str, inf_conditioning: str, bow=False, bow_tl=False):
 
         super().__init__()
         self.latent_size = latent_size
@@ -41,7 +41,7 @@ class AEVNMT(nn.Module):
         self.inf_network = InferenceNetwork(
             family=posterior_family,
             latent_size=latent_size,
-            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder??? 
+            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder???
             hidden_size=encoder.hidden_size,
             encoder=get_inference_encoder(
                 encoder_style=inf_encoder_style,
@@ -56,7 +56,7 @@ class AEVNMT(nn.Module):
                 transformer_layers=8, # TODO: create a hyperparameter for this
                 nli_shared_size=self.language_model.embedder.embedding_dim,
                 nli_max_distance=20,  # TODO: create a hyperaparameter for this
-                dropout=dropout)
+                dropout=dropout))
 
 
         self.bow_output_layer=None
@@ -110,7 +110,7 @@ class AEVNMT(nn.Module):
             if prior_scale <= 0:
                 raise ValueError("The prior variance must be strictly positive.")
             # uniform prior over components
-            self.register_buffer("prior_logits", torch.ones(num_components)) 
+            self.register_buffer("prior_logits", torch.ones(num_components))
             self.register_buffer("prior_locations", - prior_radius + torch.rand([num_components, latent_size]) * 2 * prior_radius )
             self.register_buffer("prior_scales", torch.full([num_components, latent_size], prior_scale))
         else:
@@ -402,7 +402,7 @@ class AEVNMT(nn.Module):
 
         bow_log_likelihood = - bow_loss - bow_loss_tl
 
-    
+
         # TODO: N this is [...,D], whereas with MoG this is [...]
         #  we need to wrap stuff around torch.distributions.Independent
         KL = torch.distributions.kl.kl_divergence(qz, pz)
