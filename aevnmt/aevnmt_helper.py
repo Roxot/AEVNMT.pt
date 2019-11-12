@@ -1,13 +1,14 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
-from torch.distributions.normal import Normal
+from torch.distributions import Normal
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
 from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode
 from aevnmt.models import AEVNMT, RNNLM
-from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
+from aevnmt.dist import get_named_params
+from .train_utils import create_attention, create_encoder, create_decoder, attention_summary, compute_bleu
 
 from torch.utils.data import DataLoader
 
@@ -36,12 +37,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                   num_layers=hparams.num_dec_layers,
                   cell_type=hparams.cell_type,
                   tied_embeddings=hparams.tied_embeddings)
-    encoder = RNNEncoder(emb_size=hparams.emb_size,
-                         hidden_size=hparams.hidden_size,
-                         bidirectional=hparams.bidirectional,
-                         dropout=hparams.dropout,
-                         num_layers=hparams.num_enc_layers,
-                         cell_type=hparams.cell_type)
+    encoder = create_encoder(hparams)
     attention = create_attention(hparams)
     decoder = create_decoder(attention, hparams)
     model = AEVNMT(tgt_vocab_size=vocab_tgt.size(),
@@ -53,15 +49,20 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    pad_idx=vocab_tgt[PAD_TOKEN],
                    dropout=hparams.dropout,
                    tied_embeddings=hparams.tied_embeddings,
+                   prior_family=hparams.prior,
+                   prior_params=hparams.prior_params,
+                   posterior_family=hparams.posterior,
+                   inf_encoder_style=hparams.inf_encoder_style,
+                   inf_conditioning=hparams.inf_conditioning,
                    bow=hparams.bow_loss,
                    bow_tl=hparams.bow_loss_tl)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
-               hparams, step):
+               hparams, step, summary_writer=None):
 
     # Use q(z|x) for training to sample a z.
-    qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
+    qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
     z = qz.rsample()
 
     # Compute the translation and language model logits.
@@ -80,6 +81,19 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       reduction="mean",
                       bow_logits=bow_logits,
                       bow_logits_tl=bow_logits_tl)
+
+    if summary_writer:
+        summary_writer.add_histogram("posterior/z", z, step)
+        for param_name, param_value in get_named_params(qz):
+            summary_writer.add_histogram("posterior/%s" % param_name, param_value, step)
+        pz = model.prior()
+        # This part is perhaps not necessary for a simple prior (e.g. Gaussian), 
+        #  but it's useful for more complex priors (e.g. mixtures and NFs)
+        prior_sample = pz.sample(torch.Size([z.size(0)]))
+        summary_writer.add_histogram("prior/z", prior_sample, step)
+        for param_name, param_value in get_named_params(pz):
+            summary_writer.add_histogram("prior/%s" % param_name, param_value, step)
+
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title='xy', summary_writer=None):
@@ -128,8 +142,8 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
         with torch.no_grad():
             val_sentence_x, val_sentence_y = val_data[0]
             x_in, _, seq_mask_x, seq_len_x = create_batch([val_sentence_x], vocab_src, device)
-            y_in, y_out, _, _ = create_batch([val_sentence_y], vocab_tgt, device)
-            z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x).sample()
+            y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
+            z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
             _, _, att_weights,_,_ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
             att_weights = att_weights.squeeze().cpu().numpy()
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
@@ -146,7 +160,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         x_in, _, seq_mask_x, seq_len_x = create_batch(input_sentences, vocab_src, device)
 
         # For translation we use the approximate posterior mean.
-        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
+        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, 
+                y=x_in, seq_mask_y=seq_mask_x, seq_len_y=seq_len_x) # TODO: here we need a prediction net!
         z = qz.mean if deterministic else qz.sample()
 
         encoder_outputs, encoder_final = model.encode(x_in, seq_len_x, z)
@@ -208,8 +223,8 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
             y_in, y_out, seq_mask_y, seq_len_y = create_batch(sentences_y, vocab_tgt, device)
 
             # Infer q(z|x) for this batch.
-            qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x)
-            pz = model.prior().expand(qz.mean.size())
+            qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
+            pz = model.prior()  #.expand(qz.mean.size())
             total_KL += torch.distributions.kl.kl_divergence(qz, pz).sum().item()
 
             # Take s importance samples from q(z|x):
@@ -272,8 +287,8 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                         log_bow_prob_tl[i]=torch.sum( bow_logprobs_tl[i][bow] )
 
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
-                log_pz = pz.log_prob(z).sum(dim=1) # [B, latent_size] -> [B]
-                log_qz = qz.log_prob(z).sum(dim=1)
+                log_pz = pz.log_prob(z) # [B, latent_size] -> [B]
+                log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
                 batch_log_marginals[s] = log_tm_prob + log_lm_prob + log_pz - log_qz

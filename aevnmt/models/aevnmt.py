@@ -1,47 +1,25 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Independent
 
 from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
-from aevnmt.dist import NormalLayer
+from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
+from aevnmt.dist import get_named_params
+from aevnmt.dist import NormalLayer, KumaraswamyLayer
+from probabll.distributions import MixtureOfGaussians
+from .inference import get_inference_encoder
+from .inference import InferenceNetwork
 
 from itertools import chain
 
-class InferenceNetwork(nn.Module):
-
-    def __init__(self, src_embedder, hidden_size, latent_size, bidirectional, num_enc_layers, cell_type):
-        """
-        :param src_embedder: uses this embedder, but detaches its output from the graph as to not compute
-                             gradients for it.
-        """
-        super().__init__()
-        self.src_embedder = src_embedder
-        emb_size = src_embedder.embedding_dim
-        self.encoder = RNNEncoder(emb_size=emb_size,
-                                  hidden_size=hidden_size,
-                                  bidirectional=bidirectional,
-                                  dropout=0.,
-                                  num_layers=num_enc_layers,
-                                  cell_type=cell_type)
-        encoding_size = hidden_size if not bidirectional else hidden_size * 2
-        self.normal_layer = NormalLayer(encoding_size, hidden_size, latent_size)
-
-    def forward(self, x, seq_mask_x, seq_len_x):
-        x_embed = self.src_embedder(x).detach()
-        encoder_outputs, _ = self.encoder(x_embed, seq_len_x)
-        avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
-        return self.normal_layer(avg_encoder_output)
-
-    def parameters(self, recurse=True):
-        return chain(self.encoder.parameters(recurse=recurse), self.normal_layer.parameters(recurse=recurse))
-
-    def named_parameters(self, prefix='', recurse=True):
-        return chain(self.encoder.named_parameters(prefix='', recurse=True), self.normal_layer.named_parameters(prefix='', recurse=True), )
 
 class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
-                 pad_idx, dropout, tied_embeddings,bow=False, bow_tl=False):
+            pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
+            inf_encoder_style: str, inf_conditioning: str, bow=False, bow_tl=False): 
+
         super().__init__()
         self.latent_size = latent_size
         self.pad_idx = pad_idx
@@ -59,12 +37,26 @@ class AEVNMT(nn.Module):
                                                 nn.Tanh())
         self.lm_init_layer = nn.Sequential(nn.Linear(latent_size, language_model.hidden_size),
                                            nn.Tanh())
-        self.inf_network = InferenceNetwork(src_embedder=self.language_model.embedder,
-                                            hidden_size=encoder.hidden_size,
-                                            latent_size=latent_size,
-                                            bidirectional=encoder.bidirectional,
-                                            num_enc_layers=encoder.num_layers,
-                                            cell_type=encoder.cell_type)
+
+        self.inf_network = InferenceNetwork(
+            family=posterior_family,
+            latent_size=latent_size,
+            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder??? 
+            hidden_size=encoder.hidden_size,
+            encoder=get_inference_encoder(
+                encoder_style=inf_encoder_style,
+                conditioning_context=inf_conditioning,
+                embedder_x=self.language_model.embedder,
+                embedder_y=self.tgt_embedder,
+                hidden_size=encoder.hidden_size,
+                rnn_bidirectional=encoder.bidirectional,
+                rnn_num_layers=encoder.num_layers,
+                rnn_cell_type=encoder.cell_type,
+                transformer_heads=8,  # TODO: create a hyperparameter for this
+                transformer_layers=8, # TODO: create a hyperparameter for this
+                nli_shared_size=self.language_model.embedder.embedding_dim,
+                nli_max_distance=20,  # TODO: create a hyperaparameter for this
+                dropout=dropout)
 
 
         self.bow_output_layer=None
@@ -81,8 +73,48 @@ class AEVNMT(nn.Module):
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
         # they will be moved to the appropriate device on which the model is run.
-        self.register_buffer("prior_loc", torch.zeros([latent_size]))
-        self.register_buffer("prior_scale", torch.ones([latent_size]))
+        self.prior_family = prior_family
+        self.posterior_family = posterior_family
+        if prior_family == "gaussian":
+            if not prior_params:
+                prior_params = [0., 1.]
+            if len(prior_params) != 2:
+                raise ValueError("Specify the Gaussian prior using a location and a strictly positive scale.")
+            if prior_params[1] <= 0:
+                raise ValueError("The scale of a Gaussian distribution is strictly positive: %r" % prior_params)
+            self.register_buffer("prior_loc", torch.zeros([latent_size]))
+            self.register_buffer("prior_scale", torch.ones([latent_size]))
+        elif prior_family == "beta":
+            if not prior_params:
+                prior_params = [0.5, 0.5]
+            if len(prior_params) != 2:
+                raise ValueError("Specify the Beta prior using two strictly positive shape parameters.")
+            if prior_params[0] <= 0. or prior_params[1] <= 0.:
+                raise ValueError("The shape parameters of a Beta distribution are strictly positive: %r" % prior_params)
+            self.register_buffer("prior_a", torch.full([latent_size], prior_params[0]))
+            self.register_buffer("prior_b", torch.full([latent_size], prior_params[1]))
+            if posterior_family != "kumaraswamy":
+                raise ValueError("I think you forgot to change your posterior distribution to something with support (0,1)")
+        elif prior_family == "mog":
+            if not prior_params:
+                prior_params = [10, 10, 0.5]
+            if len(prior_params) != 3:
+                raise ValueError("Specify the MoG prior using a number of components, a radius (for initialisation), and a strictly positive scale.")
+            num_components = prior_params[0]
+            if num_components <= 1:
+                raise ValueError("An MoG prior requires more than 1 component.")
+            prior_radius = prior_params[1]
+            if prior_radius <= 0:
+                raise ValueError("Initialising the MoG prior takes a strictly positive radius.")
+            prior_scale = prior_params[2]
+            if prior_scale <= 0:
+                raise ValueError("The prior variance must be strictly positive.")
+            # uniform prior over components
+            self.register_buffer("prior_logits", torch.ones(num_components)) 
+            self.register_buffer("prior_locations", - prior_radius + torch.rand([num_components, latent_size]) * 2 * prior_radius )
+            self.register_buffer("prior_scales", torch.full([num_components, latent_size], prior_scale))
+        else:
+            raise NotImplementedError("I cannot impose a %s prior on the latent code." % prior_family)
 
     def inference_parameters(self):
         return self.inf_network.parameters()
@@ -118,15 +150,20 @@ class AEVNMT(nn.Module):
             params = chain(params, [self.output_matrix])
         return params
 
-    def approximate_posterior(self, x, seq_mask_x, seq_len_x):
+    def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
-        Returns an approximate posterior distribution q(z|x).
+        Returns an approximate posterior distribution q(z|x, y).
         """
-        return self.inf_network(x, seq_mask_x, seq_len_x)
+        return self.inf_network(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
 
-    def prior(self):
-        return torch.distributions.Normal(loc=self.prior_loc,
-                                          scale=self.prior_scale)
+    def prior(self) -> torch.distributions.Distribution:
+        if self.prior_family == "gaussian":
+            p = Independent(torch.distributions.Normal(loc=self.prior_loc, scale=self.prior_scale), 1)
+        elif self.prior_family == "beta":
+            p = Independent(torch.distributions.Beta(self.prior_a, self.prior_b), 1)
+        elif self.prior_family == "mog":
+            p = MixtureOfGaussians(logits=self.prior_logits, locations=self.prior_locations, scales=self.prior_scales)
+        return p
 
     def src_embed(self, x):
 
@@ -357,7 +394,7 @@ class AEVNMT(nn.Module):
 
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
-        pz = self.prior().expand(qz.mean.size())
+        pz = self.prior()  #.expand(qz.mean.size())
 
         # The loss is the negative ELBO.
         tm_log_likelihood = -tm_loss
@@ -365,9 +402,13 @@ class AEVNMT(nn.Module):
 
         bow_log_likelihood = - bow_loss - bow_loss_tl
 
+    
+        # TODO: N this is [...,D], whereas with MoG this is [...]
+        #  we need to wrap stuff around torch.distributions.Independent
         KL = torch.distributions.kl.kl_divergence(qz, pz)
-        raw_KL = KL.sum(dim=1)
-        KL = KL.sum(dim=1)
+        raw_KL = KL * 1
+        #raw_KL = KL.sum(dim=1)
+        #KL = KL.sum(dim=1)
 
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)

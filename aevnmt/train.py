@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from tensorboardX import SummaryWriter
 
-from aevnmt.train_utils import load_data, load_vocabularies, gradient_norm
+from aevnmt.train_utils import load_data, load_vocabularies, gradient_norm, log_gradient_histograms
 from aevnmt.train_utils import CheckPoint, model_parameter_count
 from aevnmt.hparams import Hyperparameters
 from aevnmt.data import BucketingParallelDataLoader
@@ -81,7 +81,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                             hparams, step, summary_writer=summary_writer)
 
         # Update the learning rate scheduler.
-        lr_scheduler_step(lr_schedulers, metrics[hparams.criterion], hparams)
+        lr_scheduler_step(lr_schedulers, hparams, val_score=metrics[hparams.criterion])
 
         ckpt.update(
             epoch_num, step, {f"{hparams.src}-{hparams.tgt}": model},
@@ -103,8 +103,10 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in = create_noisy_batch(
                 sentences_y, vocab_tgt, device,
                 word_dropout=hparams.word_dropout)
-            loss = train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
-                              y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, step)["loss"]
+            loss = train_step(
+                    model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
+                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, 
+                    step, summary_writer=summary_writer)["loss"]
 
             # Backpropagate and update gradients.
             loss.backward()
@@ -139,6 +141,9 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             # Zero the gradient buffer.
             optimizers["gen"].zero_grad()
             if "inf_z" in optimizers: optimizers["inf_z"].zero_grad()
+
+            # Update the learning rate scheduler if needed.
+            lr_scheduler_step(lr_schedulers, hparams)
 
             # Run evaluation every evaluate_every steps if set.
             if hparams.evaluate_every > 0 and step > 0 and step % hparams.evaluate_every == 0:

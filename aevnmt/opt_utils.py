@@ -3,6 +3,7 @@ import torch.nn as nn
 from functools import partial
 from itertools import tee
 
+from aevnmt.components import NoamScheduler
 
 class RequiresGradSwitch:
     """
@@ -52,17 +53,23 @@ def get_optimizer(name, parameters, lr, l2_weight, momentum=0.):
     return cls(params=parameters, lr=lr, weight_decay=l2_weight)
 
 
-def get_lr_scheduler(optimizer, lr_reduce_factor, lr_reduce_patience, lr_reduce_cooldown, min_lr):
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        mode="max",
-        factor=lr_reduce_factor,
-        patience=lr_reduce_patience,
-        verbose=False,
-        threshold=1e-2,
-        threshold_mode="abs",
-        cooldown=lr_reduce_cooldown,
-        min_lr=min_lr)
+def get_lr_scheduler(optimizer, hparams):
+    if hparams.lr_scheduler == "reduce_on_plateau":
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode="max",
+            factor=hparams.lr_reduce_factor,
+            patience=hparams.lr_reduce_patience,
+            verbose=False,
+            threshold=1e-2,
+            threshold_mode="abs",
+            cooldown=hparams.lr_reduce_cooldown,
+            min_lr=hparams.min_lr)
+    elif hparams.lr_scheduler == "noam":
+        scheduler = NoamScheduler(hidden_size=hparams.emb_size,
+                                  optimizer=optimizer,
+                                  factor=hparams.lr_reduce_factor,
+                                  warmup=hparams.lr_warmup)
     return scheduler
 
 
@@ -87,32 +94,43 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters):
     lr_schedulers = {
         "gen": get_lr_scheduler(
             optimizers["gen"],
-            hparams.lr_reduce_factor,
-            hparams.lr_reduce_patience,
-            hparams.lr_reduce_cooldown,
-            hparams.min_lr
+            hparams
         ),
     }
 
     if inf_z_parameters is not None:
         lr_schedulers["inf_z"] = get_lr_scheduler(
             optimizers["inf_z"],
-            hparams.lr_reduce_factor,
-            hparams.lr_reduce_patience,
-            hparams.lr_reduce_cooldown,
-            hparams.min_lr
+            hparams
         )
 
     return optimizers, lr_schedulers
 
 
-def lr_scheduler_step(lr_schedulers, val_bleu, hparams):
+def lr_scheduler_step(lr_schedulers, hparams, val_score=None):
+    """
+    Only updates if it's appropriate for the scheduler. I.e. it updates the LRonPLateauScheduler
+    only during validation, and the NoamScheduler only during training.
+    """
     for name, lr_scheduler in lr_schedulers.items():
-        lr_scheduler.step(val_bleu)
-        if lr_scheduler.cooldown_counter == hparams.lr_reduce_cooldown:
-            print(f"Reduced the learning rate for '{name}' with a factor"
-                  f" {hparams.lr_reduce_cooldown}")
 
+        if isinstance(lr_scheduler, optim.lr_scheduler.ReduceLROnPlateau):
+
+            # Don't update the ReduceLROnPlateau scheduler during training.
+            if val_score is None:
+                continue
+
+            lr_scheduler.step(val_score)
+            if lr_scheduler.cooldown_counter == hparams.lr_reduce_cooldown:
+                print(f"Reduced the learning rate for '{name}' with a factor"
+                      f" {hparams.lr_reduce_cooldown}")
+
+        if isinstance(lr_scheduler, NoamScheduler):
+
+            # Don't update the NoamScheduler during validation.
+            if val_score is not None:
+                continue
+            lr_scheduler.step()
 
 def take_optimizer_step(optimizer, parameters, clip_grad_norm=0., zero_grad=True):
     if clip_grad_norm > 0:
