@@ -52,7 +52,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
 
         luong_decoding = isinstance(decoder, LuongDecoder)
 
-        # Initialize the hjidden state and create the initial input.
+        # Initialize the hidden state and create the initial input.
         batch_size = seq_mask_x.size(0)
         prev_y = torch.full(size=[batch_size], fill_value=sos_idx, dtype=torch.long,
                             device=seq_mask_x.device)

@@ -4,25 +4,36 @@ This repository contains a PyTorch implementation of our <a href="https://arxiv.
 
 # Installation
 
-Requirements
-
+You will need python3.6 or newer:
 ```bash
 virtualenv -p python3.6 ~/envs/aevnmt.pt
 source ~/envs/aevnmt.pt/bin/activate
+```
+
+You will need an extension to torch distributions which you can install easily:
+```bash
+git clone https://github.com/probabll/dists.pt.git
+cd dists.pt
+pip install -r requirements.txt
+pip install .
+cd ..
+```
+
+Then you will need AEVNMT.pt: 
+``` 
+git clone https://github.com/Roxot/AEVNMT.pt.git 
+cd AEVNMT.pt
 pip install -r requirements.txt
 ```
 
-Then, for developers:
-
-
+For developers, we recommend
 ```bash
 python setup.py develop
 ```
 
-Alternatively, for users:
-
+For other users, we recommend 
 ```bash
-python setup.py install
+pip install .
 ```
 
 # Command line interface

@@ -3,19 +3,14 @@ import numpy as np
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
-from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_decode, ancestral_sample
+from aevnmt.components import RNNEncoder, TransformerEncoder, beam_search, greedy_decode, sampling_decode, ancestral_sample
 from aevnmt.models import ConditionalNMT
-from .train_utils import create_attention, create_decoder, attention_summary, compute_bleu
+from .train_utils import create_encoder, create_attention, create_decoder, attention_summary, compute_bleu
 
 from torch.utils.data import DataLoader
 
 def create_model(hparams, vocab_src, vocab_tgt):
-    encoder = RNNEncoder(emb_size=hparams.emb_size,
-                         hidden_size=hparams.hidden_size,
-                         bidirectional=hparams.bidirectional,
-                         dropout=hparams.dropout,
-                         num_layers=hparams.num_enc_layers,
-                         cell_type=hparams.cell_type)
+    encoder = create_encoder(hparams)
     attention = create_attention(hparams)
     decoder = create_decoder(attention, hparams)
     model = ConditionalNMT(src_vocab_size=vocab_src.size(),

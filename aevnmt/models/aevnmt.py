@@ -1,51 +1,24 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributions import Independent
 
 from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
-from aevnmt.dist import NormalLayer
+from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
+from aevnmt.dist import get_named_params
+from aevnmt.dist import NormalLayer, KumaraswamyLayer
+from probabll.distributions import MixtureOfGaussians
+from .inference import get_inference_encoder
+from .inference import InferenceNetwork
 
 from itertools import chain
 
-class InferenceNetwork(nn.Module):
-
-    def __init__(self, src_embedder, hidden_size, latent_size, bidirectional, num_enc_layers, cell_type,max_pool=False):
-        """
-        :param src_embedder: uses this embedder, but detaches its output from the graph as to not compute
-                             gradients for it.
-        """
-        super().__init__()
-        self.max_pool=max_pool
-        self.src_embedder = src_embedder
-        emb_size = src_embedder.embedding_dim
-        self.encoder = RNNEncoder(emb_size=emb_size,
-                                  hidden_size=hidden_size,
-                                  bidirectional=bidirectional,
-                                  dropout=0.,
-                                  num_layers=num_enc_layers,
-                                  cell_type=cell_type)
-        encoding_size = hidden_size if not bidirectional else hidden_size * 2
-        self.normal_layer = NormalLayer(encoding_size, hidden_size, latent_size)
-
-    def forward(self, x, seq_mask_x, seq_len_x):
-        x_embed = self.src_embedder(x).detach()
-        encoder_outputs, _ = self.encoder(x_embed, seq_len_x)
-        if self.max_pool:
-            avg_encoder_output = encoder_outputs.max(dim=1)[0]
-        else:
-            avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
-        return self.normal_layer(avg_encoder_output)
-
-    def parameters(self, recurse=True):
-        return chain(self.encoder.parameters(recurse=recurse), self.normal_layer.parameters(recurse=recurse))
-
-    def named_parameters(self, prefix='', recurse=True):
-        return chain(self.encoder.named_parameters(prefix='', recurse=True), self.normal_layer.named_parameters(prefix='', recurse=True), )
 
 class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
-                 pad_idx, dropout, tied_embeddings, feed_z=False,max_pool=False):
+            pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
+            inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, bow=False, bow_tl=False):
         super().__init__()
         self.feed_z=feed_z
         self.latent_size = latent_size
@@ -64,18 +37,84 @@ class AEVNMT(nn.Module):
                                                 nn.Tanh())
         self.lm_init_layer = nn.Sequential(nn.Linear(latent_size, language_model.hidden_size),
                                            nn.Tanh())
-        self.inf_network = InferenceNetwork(src_embedder=self.language_model.embedder,
-                                            hidden_size=encoder.hidden_size,
-                                            latent_size=latent_size,
-                                            bidirectional=encoder.bidirectional,
-                                            num_enc_layers=encoder.num_layers,
-                                            cell_type=encoder.cell_type,max_pool=max_pool)
+
+        self.inf_network = InferenceNetwork(
+            family=posterior_family,
+            latent_size=latent_size,
+            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder???
+            hidden_size=encoder.hidden_size,
+            encoder=get_inference_encoder(
+                encoder_style=inf_encoder_style,
+                conditioning_context=inf_conditioning,
+                embedder_x=self.language_model.embedder,
+                embedder_y=self.tgt_embedder,
+                hidden_size=encoder.hidden_size,
+                rnn_bidirectional=encoder.bidirectional,
+                rnn_num_layers=encoder.num_layers,
+                rnn_cell_type=encoder.cell_type,
+                transformer_heads=8,  # TODO: create a hyperparameter for this
+                transformer_layers=8, # TODO: create a hyperparameter for this
+                nli_shared_size=self.language_model.embedder.embedding_dim,
+                nli_max_distance=20,  # TODO: create a hyperaparameter for this
+                dropout=dropout),max_pool=max_pool)
+
+
+        self.bow_output_layer=None
+        self.bow_output_layer_tl=None
+
+        if bow:
+            self.bow_output_layer = nn.Linear(latent_size,
+                                              self.language_model.embedder.num_embeddings, bias=True)
+
+        if bow_tl:
+            self.bow_output_layer_tl = nn.Linear(latent_size,
+                                              self.tgt_embedder.num_embeddings, bias=True)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
         # they will be moved to the appropriate device on which the model is run.
-        self.register_buffer("prior_loc", torch.zeros([latent_size]))
-        self.register_buffer("prior_scale", torch.ones([latent_size]))
+        self.prior_family = prior_family
+        self.posterior_family = posterior_family
+        if prior_family == "gaussian":
+            if not prior_params:
+                prior_params = [0., 1.]
+            if len(prior_params) != 2:
+                raise ValueError("Specify the Gaussian prior using a location and a strictly positive scale.")
+            if prior_params[1] <= 0:
+                raise ValueError("The scale of a Gaussian distribution is strictly positive: %r" % prior_params)
+            self.register_buffer("prior_loc", torch.zeros([latent_size]))
+            self.register_buffer("prior_scale", torch.ones([latent_size]))
+        elif prior_family == "beta":
+            if not prior_params:
+                prior_params = [0.5, 0.5]
+            if len(prior_params) != 2:
+                raise ValueError("Specify the Beta prior using two strictly positive shape parameters.")
+            if prior_params[0] <= 0. or prior_params[1] <= 0.:
+                raise ValueError("The shape parameters of a Beta distribution are strictly positive: %r" % prior_params)
+            self.register_buffer("prior_a", torch.full([latent_size], prior_params[0]))
+            self.register_buffer("prior_b", torch.full([latent_size], prior_params[1]))
+            if posterior_family != "kumaraswamy":
+                raise ValueError("I think you forgot to change your posterior distribution to something with support (0,1)")
+        elif prior_family == "mog":
+            if not prior_params:
+                prior_params = [10, 10, 0.5]
+            if len(prior_params) != 3:
+                raise ValueError("Specify the MoG prior using a number of components, a radius (for initialisation), and a strictly positive scale.")
+            num_components = prior_params[0]
+            if num_components <= 1:
+                raise ValueError("An MoG prior requires more than 1 component.")
+            prior_radius = prior_params[1]
+            if prior_radius <= 0:
+                raise ValueError("Initialising the MoG prior takes a strictly positive radius.")
+            prior_scale = prior_params[2]
+            if prior_scale <= 0:
+                raise ValueError("The prior variance must be strictly positive.")
+            # uniform prior over components
+            self.register_buffer("prior_logits", torch.ones(num_components))
+            self.register_buffer("prior_locations", - prior_radius + torch.rand([num_components, latent_size]) * 2 * prior_radius )
+            self.register_buffer("prior_scales", torch.full([num_components, latent_size], prior_scale))
+        else:
+            raise NotImplementedError("I cannot impose a %s prior on the latent code." % prior_family)
 
     def inference_parameters(self):
         return self.inf_network.parameters()
@@ -83,7 +122,20 @@ class AEVNMT(nn.Module):
     def generative_parameters(self):
         # TODO: separate the generative model into a GenerativeModel module
         #  within that module, have two modules, namely, LanguageModel and TranslationModel
-        return chain(self.lm_parameters(), self.tm_parameters())
+        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters())
+
+    def bow_parameters(self):
+        if self.bow_output_layer is None:
+            bow_params=iter(())
+        else:
+            bow_params=self.bow_output_layer.parameters()
+
+        if self.bow_output_layer_tl is None:
+            bow_params_tl=iter(())
+        else:
+            bow_params_tl=self.bow_output_layer_tl.parameters()
+
+        return chain( bow_params  , bow_params_tl   )
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
@@ -98,15 +150,20 @@ class AEVNMT(nn.Module):
             params = chain(params, [self.output_matrix])
         return params
 
-    def approximate_posterior(self, x, seq_mask_x, seq_len_x):
+    def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
-        Returns an approximate posterior distribution q(z|x).
+        Returns an approximate posterior distribution q(z|x, y).
         """
-        return self.inf_network(x, seq_mask_x, seq_len_x)
+        return self.inf_network(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
 
-    def prior(self):
-        return torch.distributions.Normal(loc=self.prior_loc,
-                                          scale=self.prior_scale)
+    def prior(self) -> torch.distributions.Distribution:
+        if self.prior_family == "gaussian":
+            p = Independent(torch.distributions.Normal(loc=self.prior_loc, scale=self.prior_scale), 1)
+        elif self.prior_family == "beta":
+            p = Independent(torch.distributions.Beta(self.prior_a, self.prior_b), 1)
+        elif self.prior_family == "mog":
+            p = MixtureOfGaussians(logits=self.prior_logits, locations=self.prior_locations, scales=self.prior_scales)
+        return p
 
     def src_embed(self, x):
 
@@ -154,6 +211,17 @@ class AEVNMT(nn.Module):
         # variable.
         lm_logits = self.run_language_model(x, z)
 
+        if self.bow_output_layer is not None:
+            bow_logits=self.bow_output_layer(z)
+        else:
+            bow_logits=None
+
+        if self.bow_output_layer_tl is not None:
+            bow_logits_tl=self.bow_output_layer_tl(z)
+        else:
+            bow_logits_tl=None
+
+
         # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
         # variable.
         tm_logits = []
@@ -168,7 +236,7 @@ class AEVNMT(nn.Module):
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
 
-        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1)
+        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1),bow_logits,bow_logits_tl
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
         """
@@ -278,7 +346,7 @@ class AEVNMT(nn.Module):
         return -tm_loss
 
     def loss(self, tm_logits, lm_logits, targets_y, targets_x, qz, free_nats=0.,
-             KL_weight=1., reduction="mean"):
+             KL_weight=1., reduction="mean", bow_logits=None, bow_logits_tl=None):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -292,6 +360,7 @@ class AEVNMT(nn.Module):
         :param free_nats: KL = min(free_nats, KL)
         :param KL_weight: weight to multiply the KL with, applied after free_nats
         :param reduction: what reduction to apply, none ([B]), mean ([]) or sum ([])
+        :param bow_logits: [B,vocab_size]
         """
 
         # Compute the loss for each batch element. Logits are of the form [B, T, vocab_size],
@@ -303,27 +372,54 @@ class AEVNMT(nn.Module):
         # Compute the language model categorical loss.
         lm_loss = self.language_model.loss(lm_logits, targets_x, reduction="none")
 
+        bow_loss=torch.zeros_like(lm_loss)
+        if bow_logits is not None:
+            bow_logprobs=-F.log_softmax(bow_logits,-1)
+            bsz=bow_logits.size(0)
+            for i in range(bsz):
+                bow=torch.unique(targets_x[i])
+                bow_mask=( bow != self.language_model.pad_idx)
+                bow=bow.masked_select(bow_mask)
+                bow_loss[i]=torch.sum( bow_logprobs[i][bow] )
+
+        bow_loss_tl=torch.zeros_like(lm_loss)
+        if bow_logits_tl is not None:
+            bow_logprobs=-F.log_softmax(bow_logits_tl,-1)
+            bsz=bow_logits_tl.size(0)
+            for i in range(bsz):
+                bow=torch.unique(targets_y[i])
+                bow_mask=( bow != self.pad_idx)
+                bow=bow.masked_select(bow_mask)
+                bow_loss_tl[i]=torch.sum( bow_logprobs[i][bow] )
+
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
-        pz = self.prior().expand(qz.mean.size())
+        pz = self.prior()  #.expand(qz.mean.size())
 
         # The loss is the negative ELBO.
         tm_log_likelihood = -tm_loss
         lm_log_likelihood = -lm_loss
 
+        bow_log_likelihood = - bow_loss - bow_loss_tl
+
+
+        # TODO: N this is [...,D], whereas with MoG this is [...]
+        #  we need to wrap stuff around torch.distributions.Independent
         KL = torch.distributions.kl.kl_divergence(qz, pz)
-        raw_KL = KL.sum(dim=1)
-        KL = KL.sum(dim=1)
+        raw_KL = KL * 1
+        #raw_KL = KL.sum(dim=1)
+        #KL = KL.sum(dim=1)
 
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-        elbo = tm_log_likelihood + lm_log_likelihood - KL
+        elbo = tm_log_likelihood + lm_log_likelihood + bow_log_likelihood - KL
         loss = -elbo
 
         out_dict = {
             'tm_log_likelihood': tm_log_likelihood,
             'lm_log_likelihood': lm_log_likelihood,
+            'bow_log_likelihood': bow_log_likelihood,
             'KL': KL,
             'raw_KL': raw_KL
         }
