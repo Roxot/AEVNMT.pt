@@ -56,7 +56,7 @@ class AEVNMT(nn.Module):
                 transformer_layers=8, # TODO: create a hyperparameter for this
                 nli_shared_size=self.language_model.embedder.embedding_dim,
                 nli_max_distance=20,  # TODO: create a hyperaparameter for this
-                dropout=dropout),max_pool=max_pool)
+                dropout=dropout, composition="maxpool" if max_pool else "avg"))
 
 
         self.bow_output_layer=None

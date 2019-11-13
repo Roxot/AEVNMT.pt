@@ -56,7 +56,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    inf_encoder_style=hparams.inf_encoder_style,
                    inf_conditioning=hparams.inf_conditioning,
                    feed_z=hparams.feed_z,
-                   max_pool=hparams.max_pooling_states
+                   max_pool=hparams.max_pooling_states,
                    bow=hparams.bow_loss,
                    bow_tl=hparams.bow_loss_tl)
     return model
@@ -90,7 +90,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
         for param_name, param_value in get_named_params(qz):
             summary_writer.add_histogram("posterior/%s" % param_name, param_value, step)
         pz = model.prior()
-        # This part is perhaps not necessary for a simple prior (e.g. Gaussian), 
+        # This part is perhaps not necessary for a simple prior (e.g. Gaussian),
         #  but it's useful for more complex priors (e.g. mixtures and NFs)
         prior_sample = pz.sample(torch.Size([z.size(0)]))
         summary_writer.add_histogram("prior/z", prior_sample, step)
@@ -163,7 +163,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         x_in, _, seq_mask_x, seq_len_x = create_batch(input_sentences, vocab_src, device)
 
         # For translation we use the approximate posterior mean.
-        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, 
+        qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x,
                 y=x_in, seq_mask_y=seq_mask_x, seq_len_y=seq_len_x) # TODO: here we need a prediction net!
         z = qz.mean if deterministic else qz.sample()
 
