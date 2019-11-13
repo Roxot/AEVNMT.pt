@@ -77,6 +77,9 @@ options = {
     "num_dec_layers": (int, 1, False, "The number of decoder layers.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+    "max_pooling_states":(bool, False, False, "Max-pool encoder states in the inference network instead of averaging them", 1),
+    "feed_z":(bool, False, False, "Concatenate z to the previous word embeddings at each timestep", 1),
+
     "bow_loss":(bool, False, False, "Add SL bag-of-words term to the loss", 1),
     "bow_loss_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
 
@@ -97,6 +100,7 @@ options = {
     "posterior": (str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 2),
     "inf_encoder_style": (str, "rnn", False, "The type of architecture: rnn|nli", 2),
     "inf_conditioning": (str, "x", False, "Conditioning context for q(z): x|xy", 2),
+
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 3),

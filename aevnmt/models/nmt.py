@@ -6,7 +6,7 @@ import torch.nn.functional as F
 class ConditionalNMT(nn.Module):
 
     def __init__(self, src_vocab_size, tgt_vocab_size, emb_size, encoder, decoder,
-                 pad_idx, dropout, tied_embeddings):
+                 pad_idx, dropout, tied_embeddings,feed_z_size=0):
         super().__init__()
         self.pad_idx = pad_idx
         self.encoder = encoder

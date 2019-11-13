@@ -39,7 +39,7 @@ def tile(x, count, dim=0):
 
 def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
                 encoder_final, seq_mask_x, sos_idx, eos_idx, pad_idx, beam_width, alpha,
-                max_len):
+                max_len,z=None):
     """
     Beam search with size beam_width. Follows OpenNMT-py implementation.
     In each decoding step, find the k most likely partial hypotheses.
@@ -64,6 +64,9 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
                                            beam_width, dim=0)
         encoder_outputs = tile(encoder_outputs.contiguous(), beam_width,
                                dim=0)               # [B*beam_width, T_x, H_enc]
+        if z is not None:
+            z=tile(z.contiguous(), beam_width,
+                               dim=0)
         seq_mask_x = tile(seq_mask_x, beam_width, dim=0)    # [B*beam_width, 1, T_x]
 
         batch_offset = torch.arange(
@@ -99,7 +102,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
             # expand current hypotheses, decode one single step
             if luong_decoding: hidden = (hidden, prev_pre_output)
             prev_y = tgt_embed_fn(prev_y)
-            pre_output, hidden, _ = decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs)
+            pre_output, hidden, _ = decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs,z)
             logits = generator_fn(pre_output)
             if luong_decoding: hidden, prev_pre_output = hidden
             log_probs = F.log_softmax(logits, dim=-1).squeeze(1)  # [B*beam_width, |V_y|]
@@ -184,6 +187,8 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
             # reorder indices, outputs and masks
             select_indices = batch_index.view(-1)
             encoder_outputs = encoder_outputs.index_select(0, select_indices)
+            if z is not None:
+                z=z.index_select(0,select_indices)
             seq_mask_x = seq_mask_x.index_select(0, select_indices)
             decoder.attention.proj_keys = decoder.attention.proj_keys. \
                     index_select(0, select_indices)

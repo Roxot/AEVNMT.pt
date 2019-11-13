@@ -18,9 +18,9 @@ class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
-            inf_encoder_style: str, inf_conditioning: str, bow=False, bow_tl=False):
-
+            inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, bow=False, bow_tl=False):
         super().__init__()
+        self.feed_z=feed_z
         self.latent_size = latent_size
         self.pad_idx = pad_idx
         self.encoder = encoder
@@ -56,7 +56,7 @@ class AEVNMT(nn.Module):
                 transformer_layers=8, # TODO: create a hyperparameter for this
                 nli_shared_size=self.language_model.embedder.embedding_dim,
                 nli_max_distance=20,  # TODO: create a hyperaparameter for this
-                dropout=dropout))
+                dropout=dropout, composition="maxpool" if max_pool else "avg"))
 
 
         self.bow_output_layer=None
@@ -199,7 +199,7 @@ class AEVNMT(nn.Module):
         :param z: a sample of the latent variable
         """
         hidden = tile_rnn_hidden(self.lm_init_layer(z), self.language_model.rnn)
-        return self.language_model(x, hidden=hidden)
+        return self.language_model(x, hidden=hidden,z=z if self.feed_z else None)
 
     def forward(self, x, seq_mask_x, seq_len_x, y, z):
 
@@ -231,7 +231,7 @@ class AEVNMT(nn.Module):
             prev_y = y[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, att_weights = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs)
+                                                                encoder_outputs,z=z if self.feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
@@ -266,7 +266,7 @@ class AEVNMT(nn.Module):
             prev_y = y_in[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, _ = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs)
+                                                                encoder_outputs,z=z if self.feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
         # [max_length, batch_size, vocab_size]

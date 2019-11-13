@@ -17,8 +17,8 @@ from aevnmt.components import DecomposableAttentionEncoder
 
 class InferenceEncoder(nn.Module):
     """
-    The encoder of AEVNMT's inference network can one or two sequences, depending on whether we want to model 
-        q(z|x) or q(z|x,y). 
+    The encoder of AEVNMT's inference network can one or two sequences, depending on whether we want to model
+        q(z|x) or q(z|x,y).
     This is a general interface, it exposes two properties
         - hidden_size
         - output_size
@@ -60,14 +60,16 @@ class RecurrentEncoderX(InferenceEncoder):
         self.hidden_size = hidden_size
         self.output_size = hidden_size if not bidirectional else hidden_size * 2
         self.composition = composition
-        if composition != "avg":
-            raise NotImplementedError("I only support average, but I welcome contributions!")
+        if composition not in ["avg","maxpool"]:
+            raise NotImplementedError("I only support average and maxpool, but I welcome contributions!")
 
     def forward(self, x, seq_mask_x, seq_len_x, y=None, seq_mask_y=None, seq_len_y=None):
         x_embed = self.embedder(x).detach()
         encoder_outputs, _ = self.rnn(x_embed, seq_len_x)
-        # TODO: support max pooling
-        avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
+        if self.composition == "maxpool":
+            avg_encoder_output = encoder_outputs.max(dim=1)[0]
+        else:
+            avg_encoder_output = (encoder_outputs * seq_mask_x.unsqueeze(-1).type_as(encoder_outputs)).sum(dim=1)
         return avg_encoder_output
 
 
@@ -100,7 +102,7 @@ class NLIEncoderXY(InferenceEncoder):
     Encodes a pair of sequences (i.e. x, y) into a fixed-dimension vector using NLI's Decomposable Attention Model.
     """
 
-    def __init__(self, embedder_x, embedder_y, shared_size, hidden_size, 
+    def __init__(self, embedder_x, embedder_y, shared_size, hidden_size,
             max_distance=20, dropout=0., mask_diagonal=False, relu_projection=False, use_self_att_dropout=False):
         super().__init__()
         self.embedder_x = embedder_x
@@ -125,12 +127,12 @@ class NLIEncoderXY(InferenceEncoder):
         return outputs
 
 
-def get_inference_encoder(encoder_style: str, conditioning_context: str, 
-        embedder_x, embedder_y, hidden_size, 
-        rnn_bidirectional, rnn_num_layers, rnn_cell_type, 
-        transformer_heads, transformer_layers, 
-        nli_shared_size, nli_max_distance, 
-        dropout=0.0) -> InferenceEncoder:
+def get_inference_encoder(encoder_style: str, conditioning_context: str,
+        embedder_x, embedder_y, hidden_size,
+        rnn_bidirectional, rnn_num_layers, rnn_cell_type,
+        transformer_heads, transformer_layers,
+        nli_shared_size, nli_max_distance,
+        dropout=0.0,composition="avg") -> InferenceEncoder:
     """Creates the appropriate encoder as a function of encoder_style and conditioning_context."""
     if encoder_style == "rnn":
         if conditioning_context == "x":
@@ -140,7 +142,7 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
                 bidirectional=rnn_bidirectional,
                 num_layers=rnn_num_layers,
                 cell_type=rnn_cell_type,
-                dropout=dropout)
+                dropout=dropout,composition=composition)
         else:
             raise NotImplementedError("I cannot yet condition on the pair (x,y) with an RNN, but I welcome contributions!")
     elif encoder_style == "transformer":
@@ -198,5 +200,3 @@ class InferenceNetwork(nn.Module):
 
     def named_parameters(self, prefix='', recurse=True):
         return chain(self.encoder.named_parameters(prefix='', recurse=True), self.conditioner.named_parameters(prefix='', recurse=True), )
-
-
