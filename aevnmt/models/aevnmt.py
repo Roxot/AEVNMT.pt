@@ -18,7 +18,8 @@ class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
-            inf_encoder_style: str, inf_conditioning: str): 
+            inf_encoder_style: str, inf_conditioning: str, bow=False, bow_tl=False):
+
         super().__init__()
         self.latent_size = latent_size
         self.pad_idx = pad_idx
@@ -36,10 +37,11 @@ class AEVNMT(nn.Module):
                                                 nn.Tanh())
         self.lm_init_layer = nn.Sequential(nn.Linear(latent_size, language_model.hidden_size),
                                            nn.Tanh())
+
         self.inf_network = InferenceNetwork(
             family=posterior_family,
             latent_size=latent_size,
-            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder??? 
+            # TODO: there's too much overloading of hyperparameters, why are we using the specs from the generative encoder???
             hidden_size=encoder.hidden_size,
             encoder=get_inference_encoder(
                 encoder_style=inf_encoder_style,
@@ -54,10 +56,21 @@ class AEVNMT(nn.Module):
                 transformer_layers=8, # TODO: create a hyperparameter for this
                 nli_shared_size=self.language_model.embedder.embedding_dim,
                 nli_max_distance=20,  # TODO: create a hyperaparameter for this
-                dropout=dropout)
-            )
+                dropout=dropout))
 
-        # This is done because the prior parameters are not considered trainable
+
+        self.bow_output_layer=None
+        self.bow_output_layer_tl=None
+
+        if bow:
+            self.bow_output_layer = nn.Linear(latent_size,
+                                              self.language_model.embedder.num_embeddings, bias=True)
+
+        if bow_tl:
+            self.bow_output_layer_tl = nn.Linear(latent_size,
+                                              self.tgt_embedder.num_embeddings, bias=True)
+
+        # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
         # they will be moved to the appropriate device on which the model is run.
         self.prior_family = prior_family
@@ -97,7 +110,7 @@ class AEVNMT(nn.Module):
             if prior_scale <= 0:
                 raise ValueError("The prior variance must be strictly positive.")
             # uniform prior over components
-            self.register_buffer("prior_logits", torch.ones(num_components)) 
+            self.register_buffer("prior_logits", torch.ones(num_components))
             self.register_buffer("prior_locations", - prior_radius + torch.rand([num_components, latent_size]) * 2 * prior_radius )
             self.register_buffer("prior_scales", torch.full([num_components, latent_size], prior_scale))
         else:
@@ -109,7 +122,20 @@ class AEVNMT(nn.Module):
     def generative_parameters(self):
         # TODO: separate the generative model into a GenerativeModel module
         #  within that module, have two modules, namely, LanguageModel and TranslationModel
-        return chain(self.lm_parameters(), self.tm_parameters())
+        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters())
+
+    def bow_parameters(self):
+        if self.bow_output_layer is None:
+            bow_params=iter(())
+        else:
+            bow_params=self.bow_output_layer.parameters()
+
+        if self.bow_output_layer_tl is None:
+            bow_params_tl=iter(())
+        else:
+            bow_params_tl=self.bow_output_layer_tl.parameters()
+
+        return chain( bow_params  , bow_params_tl   )
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
@@ -185,6 +211,17 @@ class AEVNMT(nn.Module):
         # variable.
         lm_logits = self.run_language_model(x, z)
 
+        if self.bow_output_layer is not None:
+            bow_logits=self.bow_output_layer(z)
+        else:
+            bow_logits=None
+
+        if self.bow_output_layer_tl is not None:
+            bow_logits_tl=self.bow_output_layer_tl(z)
+        else:
+            bow_logits_tl=None
+
+
         # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
         # variable.
         tm_logits = []
@@ -199,7 +236,7 @@ class AEVNMT(nn.Module):
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
 
-        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1)
+        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1),bow_logits,bow_logits_tl
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
         """
@@ -309,7 +346,7 @@ class AEVNMT(nn.Module):
         return -tm_loss
 
     def loss(self, tm_logits, lm_logits, targets_y, targets_x, qz, free_nats=0.,
-             KL_weight=1., reduction="mean"):
+             KL_weight=1., reduction="mean", bow_logits=None, bow_logits_tl=None):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -323,6 +360,7 @@ class AEVNMT(nn.Module):
         :param free_nats: KL = min(free_nats, KL)
         :param KL_weight: weight to multiply the KL with, applied after free_nats
         :param reduction: what reduction to apply, none ([B]), mean ([]) or sum ([])
+        :param bow_logits: [B,vocab_size]
         """
 
         # Compute the loss for each batch element. Logits are of the form [B, T, vocab_size],
@@ -334,6 +372,26 @@ class AEVNMT(nn.Module):
         # Compute the language model categorical loss.
         lm_loss = self.language_model.loss(lm_logits, targets_x, reduction="none")
 
+        bow_loss=torch.zeros_like(lm_loss)
+        if bow_logits is not None:
+            bow_logprobs=-F.log_softmax(bow_logits,-1)
+            bsz=bow_logits.size(0)
+            for i in range(bsz):
+                bow=torch.unique(targets_x[i])
+                bow_mask=( bow != self.language_model.pad_idx)
+                bow=bow.masked_select(bow_mask)
+                bow_loss[i]=torch.sum( bow_logprobs[i][bow] )
+
+        bow_loss_tl=torch.zeros_like(lm_loss)
+        if bow_logits_tl is not None:
+            bow_logprobs=-F.log_softmax(bow_logits_tl,-1)
+            bsz=bow_logits_tl.size(0)
+            for i in range(bsz):
+                bow=torch.unique(targets_y[i])
+                bow_mask=( bow != self.pad_idx)
+                bow=bow.masked_select(bow_mask)
+                bow_loss_tl[i]=torch.sum( bow_logprobs[i][bow] )
+
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
         pz = self.prior()  #.expand(qz.mean.size())
@@ -341,7 +399,10 @@ class AEVNMT(nn.Module):
         # The loss is the negative ELBO.
         tm_log_likelihood = -tm_loss
         lm_log_likelihood = -lm_loss
-    
+
+        bow_log_likelihood = - bow_loss - bow_loss_tl
+
+
         # TODO: N this is [...,D], whereas with MoG this is [...]
         #  we need to wrap stuff around torch.distributions.Independent
         KL = torch.distributions.kl.kl_divergence(qz, pz)
@@ -352,12 +413,13 @@ class AEVNMT(nn.Module):
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-        elbo = tm_log_likelihood + lm_log_likelihood - KL
+        elbo = tm_log_likelihood + lm_log_likelihood + bow_log_likelihood - KL
         loss = -elbo
 
         out_dict = {
             'tm_log_likelihood': tm_log_likelihood,
             'lm_log_likelihood': lm_log_likelihood,
+            'bow_log_likelihood': bow_log_likelihood,
             'KL': KL,
             'raw_KL': raw_KL
         }

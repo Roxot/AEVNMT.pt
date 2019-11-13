@@ -77,6 +77,8 @@ options = {
     "num_dec_layers": (int, 1, False, "The number of decoder layers.", 1),
     "tied_embeddings": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
+    "bow_loss":(bool, False, False, "Add SL bag-of-words term to the loss", 1),
+    "bow_loss_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
 
 
     "encoder_style": (str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
