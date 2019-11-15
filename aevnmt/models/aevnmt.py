@@ -10,6 +10,7 @@ from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from probabll.distributions import MixtureOfGaussians
 from .inference import get_inference_encoder
 from .inference import InferenceNetwork
+from .nibm1 import NeuralIBM1
 
 from itertools import chain
 
@@ -18,7 +19,8 @@ class AEVNMT(nn.Module):
 
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
-            inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, bow=False, bow_tl=False):
+            inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, 
+            bow=False, bow_tl=False, ibm1=False):
         super().__init__()
         self.feed_z=feed_z
         self.latent_size = latent_size
@@ -69,6 +71,16 @@ class AEVNMT(nn.Module):
         if bow_tl:
             self.bow_output_layer_tl = nn.Linear(latent_size,
                                               self.tgt_embedder.num_embeddings, bias=True)
+
+        self.ibm1_gate = None
+        self.ibm1_proj = None
+        if ibm1:
+            self.ibm1_gate = nn.Sequential(
+                nn.Linear(self.language_model.embedder.num_embeddings, latent_size), 
+                nn.Sigmoid()
+            )
+            self.ibm1_proj = nn.Linear(latent_size, latent_size)
+            self.nibm1 = NeuralIBM1(self.language_model.vocab_size, tgt_vocab_size, latent_size, hidden_size, pad_idx)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -122,7 +134,7 @@ class AEVNMT(nn.Module):
     def generative_parameters(self):
         # TODO: separate the generative model into a GenerativeModel module
         #  within that module, have two modules, namely, LanguageModel and TranslationModel
-        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters())
+        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters(), self.ibm1_parameters())
 
     def bow_parameters(self):
         if self.bow_output_layer is None:
@@ -136,6 +148,11 @@ class AEVNMT(nn.Module):
             bow_params_tl=self.bow_output_layer_tl.parameters()
 
         return chain( bow_params  , bow_params_tl   )
+
+    def ibm1_parameters(self):
+        ibm1_gate = iter(()) if self.ibm1_gate is None else self.ibm1_gate.parameters()
+        ibm1_proj = iter(()) if self.ibm1_proj is None else self.ibm1_projection.parameters()
+        return chain(ibm1_gate, ibm1_proj)
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
@@ -177,10 +194,18 @@ class AEVNMT(nn.Module):
         y_embed = self.dropout_layer(y_embed)
         return y_embed
 
-    def encode(self, x, seq_len_x, z):
+    def embed_and_encode(self, x, seq_len_x, z):
+        """
+        Return x_embed, encoder_return
+        where encoder_return is (encoder_outputs, encoder_final)
+        """
         x_embed = self.src_embed(x)
         hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
-        return self.encoder(x_embed, seq_len_x, hidden=hidden)
+        return x_embed, self.encoder(x_embed, seq_len_x, hidden=hidden)
+    
+    def encode(self, x, seq_len_x, z):
+        _, encoder_return = self.embed_and_encode(x, seq_len_x, z)
+        return encoder_return
 
     def init_decoder(self, encoder_outputs, encoder_final, z):
         self.decoder.init_decoder(encoder_outputs, encoder_final)
@@ -204,7 +229,7 @@ class AEVNMT(nn.Module):
     def forward(self, x, seq_mask_x, seq_len_x, y, z):
 
         # Encode the source sentence and initialize the decoder hidden state.
-        encoder_outputs, encoder_final = self.encode(x, seq_len_x, z)
+        x_embed, (encoder_outputs, encoder_final) = self.embed_and_encode(x, seq_len_x, z)
         hidden = self.init_decoder(encoder_outputs, encoder_final, z)
 
         # Estimate the Categorical parameters for E[P(x|z)] using the given sample of the latent
@@ -221,6 +246,15 @@ class AEVNMT(nn.Module):
         else:
             bow_logits_tl=None
 
+        if self.ibm1_gate is not None:
+            # [B, Tx, Dz]
+            x_gate_for_z = self.ibm1_gate(x_embed)
+            # [B, Tx, Dz]
+            x_for_ibm1 = self.ibm1_proj(x_gate_for_z * z.unsqueeze(1))
+            # [B, Tx, V]
+            ibm1_marginals = - self.nibm1(x_for_ibm1, seq_mask_x, seq_len_x, y.size(1))
+        else:
+            ibm1_marginals = None
 
         # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
         # variable.
@@ -236,7 +270,7 @@ class AEVNMT(nn.Module):
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
 
-        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1),bow_logits,bow_logits_tl
+        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1),bow_logits,bow_logits_tl, ibm1_marginals
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
         """
@@ -346,7 +380,7 @@ class AEVNMT(nn.Module):
         return -tm_loss
 
     def loss(self, tm_logits, lm_logits, targets_y, targets_x, qz, free_nats=0.,
-             KL_weight=1., reduction="mean", bow_logits=None, bow_logits_tl=None):
+             KL_weight=1., reduction="mean", bow_logits=None, bow_logits_tl=None, ibm1_marginals=None):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -360,7 +394,9 @@ class AEVNMT(nn.Module):
         :param free_nats: KL = min(free_nats, KL)
         :param KL_weight: weight to multiply the KL with, applied after free_nats
         :param reduction: what reduction to apply, none ([B]), mean ([]) or sum ([])
-        :param bow_logits: [B,vocab_size]
+        :param bow_logits: [B,src_vocab_size]
+        :param bow_logits_tl: [B,tgt_vocab_size]
+        :param ibm1_marginals: [B, T_y, tgt_vocab_size]
         """
 
         # Compute the loss for each batch element. Logits are of the form [B, T, vocab_size],
@@ -392,6 +428,11 @@ class AEVNMT(nn.Module):
                 bow=bow.masked_select(bow_mask)
                 bow_loss_tl[i]=torch.sum( bow_logprobs[i][bow] )
 
+        ibm1_ll = 0.
+        if ibm1_marginals is not None:
+            # [B]
+            ibm1_ll = - self.nibm1.loss(p_marginal, targets_y)
+
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
         pz = self.prior()  #.expand(qz.mean.size())
@@ -413,13 +454,14 @@ class AEVNMT(nn.Module):
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-        elbo = tm_log_likelihood + lm_log_likelihood + bow_log_likelihood - KL
+        elbo = tm_log_likelihood + lm_log_likelihood + bow_log_likelihood + ibm1_ll - KL
         loss = -elbo
 
         out_dict = {
             'tm_log_likelihood': tm_log_likelihood,
             'lm_log_likelihood': lm_log_likelihood,
             'bow_log_likelihood': bow_log_likelihood,
+            'ibm1_log_likelihood': ibm1_ll,
             'KL': KL,
             'raw_KL': raw_KL
         }

@@ -12,6 +12,7 @@ class RNNLM(nn.Module):
         An RNN language model.
         """
         super().__init__()
+        self.vocab_size = vocab_size
         self.pad_idx = pad_idx
         self.hidden_size = hidden_size
         self.embedder = nn.Embedding(vocab_size, emb_size, padding_idx=pad_idx) if embedder is None else embedder

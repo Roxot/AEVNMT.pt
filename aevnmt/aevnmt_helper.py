@@ -69,7 +69,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     z = qz.rsample()
 
     # Compute the translation and language model logits.
-    tm_logits, lm_logits, _, bow_logits, bow_logits_tl = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
+    tm_logits, lm_logits, _, bow_logits, bow_logits_tl, ibm1_marginals = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
     # Do linear annealing of the KL over KL_annealing_steps if set.
     if hparams.KL_annealing_steps > 0:
@@ -83,7 +83,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       KL_weight=KL_weight,
                       reduction="mean",
                       bow_logits=bow_logits,
-                      bow_logits_tl=bow_logits_tl)
+                      bow_logits_tl=bow_logits_tl,
+                      ibm1_marginals=ibm1_marginals)
 
     if summary_writer:
         summary_writer.add_histogram("posterior/z", z, step)
@@ -147,7 +148,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
             x_in, _, seq_mask_x, seq_len_x = create_batch([val_sentence_x], vocab_src, device)
             y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
             z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
-            _, _, att_weights,_,_ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
+            _, _, att_weights,_,_,_ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
             att_weights = att_weights.squeeze().cpu().numpy()
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
         tgt_labels = batch_to_sentences(y_out, vocab_tgt, no_filter=True)[0].split()
@@ -263,7 +264,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 z = qz.sample()
 
                 # Compute the logits according to this sample of z.
-                tm_logits, lm_logits, _,bow_logits, bow_logits_tl = model(x_in, seq_mask_x, seq_len_x, y_in, z)
+                tm_logits, lm_logits, _,bow_logits, bow_logits_tl, ibm1_marginals = model(x_in, seq_mask_x, seq_len_x, y_in, z)
 
                 # Compute log P(y|x, z_s)
                 log_tm_prob = F.log_softmax(tm_logits, dim=-1)
@@ -291,6 +292,9 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                     for i in range(bsz):
                         bow=bow_indexes_tl[i]
                         log_bow_prob_tl[i]=torch.sum( bow_logprobs_tl[i][bow] )
+
+                if ibm1_marginals is not None:
+                    pass  # TODO implement this
 
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
                 log_pz = pz.log_prob(z) # [B, latent_size] -> [B]
