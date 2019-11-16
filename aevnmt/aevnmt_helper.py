@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -58,7 +60,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    feed_z=hparams.feed_z,
                    max_pool=hparams.max_pooling_states,
                    bow=hparams.bow_loss,
-                   bow_tl=hparams.bow_loss_tl)
+                   bow_tl=hparams.bow_loss_tl,
+                   ibm1=hparams.ibm1_loss)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
@@ -69,7 +72,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     z = qz.rsample()
 
     # Compute the translation and language model logits.
-    tm_logits, lm_logits, _, bow_logits, bow_logits_tl, ibm1_marginals = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
+    tm_logits, lm_logits, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
     # Do linear annealing of the KL over KL_annealing_steps if set.
     if hparams.KL_annealing_steps > 0:
@@ -82,9 +85,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       free_nats=hparams.KL_free_nats,
                       KL_weight=KL_weight,
                       reduction="mean",
-                      bow_logits=bow_logits,
-                      bow_logits_tl=bow_logits_tl,
-                      ibm1_marginals=ibm1_marginals)
+                      aux_lm_likelihoods=aux_lm_likelihoods,
+                      aux_tm_likelihoods=aux_tm_likelihoods)
 
     if summary_writer:
         summary_writer.add_histogram("posterior/z", z, step)
@@ -108,18 +110,18 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
                         shuffle=False, num_workers=4)
     val_dl = BucketingParallelDataLoader(val_dl)
 
-    val_ppl, val_NLL, val_KL, val_NLL_bow, val_NLL_bow_tl = _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device)
+    val_ppl, val_KL, val_NLLs = _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device)
+    val_NLL = val_NLLs['main/joint']
     val_bleu, inputs, refs, hyps = _evaluate_bleu(model, val_dl, vocab_src, vocab_tgt,
                                                   device, hparams)
 
     random_idx = np.random.choice(len(inputs))
+    nll_str = ' '.join('-- validation NLL {} = {:.2f}'.format(comp_name, comp_value)  for comp_name, comp_value in sorted(val_NLLs.items()))
     print(f"direction = {title}\n"
           f"validation perplexity = {val_ppl:,.2f}"
-          f" -- validation NLL = {val_NLL:,.2f}"
-          f" -- validation NLL BoW SL = {val_NLL_bow:,.2f}"
-          f" -- validation NLL BoW TL = {val_NLL_bow_tl:,.2f}"
           f" -- validation BLEU = {val_bleu:.2f}"
-          f" -- validation KL = {val_KL:.2f}\n"
+          f" -- validation KL = {val_KL:.2f}"
+          f" {nll_str}\n"
           f"- Source: {inputs[random_idx]}\n"
           f"- Target: {refs[random_idx]}\n"
           f"- Prediction: {hyps[random_idx]}")
@@ -137,10 +139,11 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
 
     # Write validation summaries.
     if summary_writer is not None:
-        summary_writer.add_scalar(f"{title}/validation/NLL", val_NLL, step)
         summary_writer.add_scalar(f"{title}/validation/BLEU", val_bleu, step)
         summary_writer.add_scalar(f"{title}/validation/perplexity", val_ppl, step)
         summary_writer.add_scalar(f"{title}/validation/KL", val_KL, step)
+        for comp_name, comp_value in val_NLLs.items():
+            summary_writer.add_scalar(f"{title}/validation/{comp_name}", comp_value, step)
 
         # Log the attention weights of the first validation sentence.
         with torch.no_grad():
@@ -148,7 +151,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
             x_in, _, seq_mask_x, seq_len_x = create_batch([val_sentence_x], vocab_src, device)
             y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
             z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
-            _, _, att_weights,_,_,_ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
+            _, _, att_weights, _, _ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
             att_weights = att_weights.squeeze().cpu().numpy()
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
         tgt_labels = batch_to_sentences(y_out, vocab_tgt, no_filter=True)[0].split()
@@ -220,9 +223,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
     with torch.no_grad():
         num_predictions = 0
         num_sentences = 0
-        log_marginal = 0.
-        log_marginal_bow = 0.
-        log_marginal_bow_tl = 0.
+        log_marginal = defaultdict(float)
         total_KL = 0.
         n_samples = 10
         for sentences_x, sentences_y in val_dl:
@@ -231,32 +232,13 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
 
             # Infer q(z|x) for this batch.
             qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
-            pz = model.prior()  #.expand(qz.mean.size())
+            pz = model.prior()  
             total_KL += torch.distributions.kl.kl_divergence(qz, pz).sum().item()
 
             # Take s importance samples from q(z|x):
             # log int{p(x, y, z) dz} ~= log sum_z{p(x, y, z) / q(z|x)} where z ~ q(z|x)
             batch_size = x_in.size(0)
-            batch_log_marginals = torch.zeros(n_samples, batch_size)
-
-            batch_log_marginals_bow = torch.zeros(n_samples, batch_size)
-            batch_log_marginals_bow_tl = torch.zeros(n_samples, batch_size)
-
-            bow_indexes=[]
-            if model.bow_output_layer is not None:
-                for i in range(batch_size):
-                    bow=torch.unique(x_out[i] * seq_mask_x[i].type_as(x_out[i]))
-                    bow_mask=( bow != 0)
-                    bow=bow.masked_select(bow_mask)
-                    bow_indexes.append(bow)
-
-            bow_indexes_tl=[]
-            if model.bow_output_layer_tl is not None:
-                for i in range(batch_size):
-                    bow=torch.unique(y_out[i] * seq_mask_y[i].type_as(y_out[i]),dim=-1)
-                    bow_mask=( bow != 0)
-                    bow=bow.masked_select(bow_mask)
-                    bow_indexes_tl.append(bow)
+            batch_log_marginals = defaultdict(lambda: torch.zeros(n_samples, batch_size))
 
             for s in range(n_samples):
 
@@ -264,7 +246,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 z = qz.sample()
 
                 # Compute the logits according to this sample of z.
-                tm_logits, lm_logits, _,bow_logits, bow_logits_tl, ibm1_marginals = model(x_in, seq_mask_x, seq_len_x, y_in, z)
+                tm_logits, lm_logits, _, aux_lm_likelihoods, aux_tm_likelihoods = model(x_in, seq_mask_x, seq_len_x, y_in, z)
 
                 # Compute log P(y|x, z_s)
                 log_tm_prob = F.log_softmax(tm_logits, dim=-1)
@@ -275,59 +257,35 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_lm_prob = F.log_softmax(lm_logits, dim=-1)
                 log_lm_prob = torch.gather(log_lm_prob, 2, x_out.unsqueeze(-1)).squeeze()
                 log_lm_prob = (seq_mask_x.type_as(log_lm_prob) * log_lm_prob).sum(dim=1)
-
-                log_bow_prob=torch.zeros_like(log_lm_prob)
-                log_bow_prob_tl=torch.zeros_like(log_lm_prob)
-
-                if bow_logits is not None:
-                    bow_logprobs=F.log_softmax(bow_logits,-1)
-                    bsz=bow_logits.size(0)
-                    for i in range(bsz):
-                        bow=bow_indexes[i]
-                        log_bow_prob[i]=torch.sum( bow_logprobs[i][bow] )
-
-                if bow_logits_tl is not None:
-                    bow_logprobs_tl=F.log_softmax(bow_logits_tl,dim=-1)
-                    bsz=bow_logits_tl.size(0)
-                    for i in range(bsz):
-                        bow=bow_indexes_tl[i]
-                        log_bow_prob_tl[i]=torch.sum( bow_logprobs_tl[i][bow] )
-
-                if ibm1_marginals is not None:
-                    pass  # TODO implement this
-
+                
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
                 log_pz = pz.log_prob(z) # [B, latent_size] -> [B]
                 log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
-                batch_log_marginals[s] = log_tm_prob + log_lm_prob + log_pz - log_qz
+                batch_log_marginals['main/joint'][s] = log_tm_prob + log_lm_prob + log_pz - log_qz
+                batch_log_marginals['main/lm'][s] = log_lm_prob + log_pz - log_qz
+                batch_log_marginals['main/tm'][s] = log_tm_prob + log_pz - log_qz
+                
+                for aux_comp, aux_px_z in aux_lm_likelihoods.items():
+                    batch_log_marginals['aux/lm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
+                for aux_comp, aux_py_xz in aux_tm_likelihoods.items():
+                    batch_log_marginals['aux/tm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
 
-                # Estimate the importance weighted estimate of BoW P(x) and  P(y)
-                batch_log_marginals_bow[s] = log_bow_prob + log_pz - log_qz
-                batch_log_marginals_bow_tl[s] = log_bow_prob_tl + log_pz - log_qz
-
-
-            # Average over all samples.
-            batch_log_marginal = torch.logsumexp(batch_log_marginals, dim=0) - \
-                                 torch.log(torch.Tensor([n_samples]))
-            batch_log_marginals_bow = torch.logsumexp(batch_log_marginals_bow, dim=0) - \
-                                 torch.log(torch.Tensor([n_samples]))
-            batch_log_marginals_bow_tl = torch.logsumexp(batch_log_marginals_bow_tl, dim=0) - \
-                                 torch.log(torch.Tensor([n_samples]))
-            log_marginal += batch_log_marginal.sum().item() # [B] -> []
-            log_marginal_bow += batch_log_marginals_bow.sum().item() # [B] -> []
-            log_marginal_bow_tl += batch_log_marginals_bow_tl.sum().item() # [B] -> []
+            for comp_name, log_marginals in batch_log_marginals.items():
+                # Average over all samples.
+                batch_avg = torch.logsumexp(log_marginals, dim=0) - torch.log(torch.Tensor([n_samples]))
+                log_marginal[comp_name] = log_marginal[comp_name] + batch_avg.sum().item()
 
             num_sentences += batch_size
             num_predictions += (seq_len_x.sum() + seq_len_y.sum()).item()
 
-    val_NLL = -log_marginal
-    val_NLL_bow = - log_marginal_bow
-    val_NLL_bow_tl = - log_marginal_bow_tl
-
+    val_NLL = -log_marginal['main/joint']
     val_perplexity = np.exp(val_NLL / num_predictions)
-    return val_perplexity, val_NLL/num_sentences, total_KL/num_sentences, val_NLL_bow/num_sentences, val_NLL_bow_tl/num_sentences
+
+    NLLs = {comp_name: -value / num_sentences for comp_name, value in log_marginal.items()}
+
+    return val_perplexity, total_KL/num_sentences, NLLs
 
 
 def product_of_gaussians(fwd_base: Normal, bwd_base: Normal) -> Normal:

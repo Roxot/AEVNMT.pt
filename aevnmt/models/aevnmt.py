@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Independent
+from torch.distributions import Distribution, Independent, Categorical
 
 from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
 from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
@@ -10,9 +10,9 @@ from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from probabll.distributions import MixtureOfGaussians
 from .inference import get_inference_encoder
 from .inference import InferenceNetwork
-from .nibm1 import NeuralIBM1
-
+from .generative import GenerativeLM, IndependentLM, GenerativeTM, IBM1TM, IndependentTM
 from itertools import chain
+
 
 
 class AEVNMT(nn.Module):
@@ -60,27 +60,32 @@ class AEVNMT(nn.Module):
                 nli_max_distance=20,  # TODO: create a hyperaparameter for this
                 dropout=dropout, composition="maxpool" if max_pool else "avg"))
 
-
-        self.bow_output_layer=None
-        self.bow_output_layer_tl=None
-
+        # Auxiliary LMs
+        self.aux_lms = dict()
         if bow:
-            self.bow_output_layer = nn.Linear(latent_size,
-                                              self.language_model.embedder.num_embeddings, bias=True)
+            self.bow_sl_decoder = IndependentLM(
+                latent_size=latent_size, 
+                src_vocab_size=self.language_model.embedder.num_embeddings, 
+                pad_idx=pad_idx)
+            self.aux_lms['bow'] = self.bow_sl_decoder
 
-        if bow_tl:
-            self.bow_output_layer_tl = nn.Linear(latent_size,
-                                              self.tgt_embedder.num_embeddings, bias=True)
-
-        self.ibm1_gate = None
-        self.ibm1_proj = None
+        # Auxiliary TMs
+        self.aux_tms = dict()
         if ibm1:
-            self.ibm1_gate = nn.Sequential(
-                nn.Linear(self.language_model.embedder.num_embeddings, latent_size), 
-                nn.Sigmoid()
-            )
-            self.ibm1_proj = nn.Linear(latent_size, latent_size)
-            self.nibm1 = NeuralIBM1(self.language_model.vocab_size, tgt_vocab_size, latent_size, hidden_size, pad_idx)
+            self.ibm1_decoder = IBM1TM(
+                src_embed=self.language_model.embedder,
+                latent_size=latent_size,
+                hidden_size=decoder.hidden_size,
+                src_vocab_size=self.language_model.vocab_size,
+                tgt_vocab_size=tgt_vocab_size,
+                pad_idx=pad_idx)
+            self.aux_tms['ibm1'] = self.ibm1_decoder
+        if bow_tl:
+            self.bow_tl_decoder = IndependentTM(
+                latent_size=latent_size,
+                tgt_vocab_size=tgt_vocab_size,
+                pad_idx=pad_idx)
+            self.aux_tms['bow'] = self.bow_tl_decoder
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -137,22 +142,12 @@ class AEVNMT(nn.Module):
         return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters(), self.ibm1_parameters())
 
     def bow_parameters(self):
-        if self.bow_output_layer is None:
-            bow_params=iter(())
-        else:
-            bow_params=self.bow_output_layer.parameters()
-
-        if self.bow_output_layer_tl is None:
-            bow_params_tl=iter(())
-        else:
-            bow_params_tl=self.bow_output_layer_tl.parameters()
-
-        return chain( bow_params  , bow_params_tl   )
+        sl = iter(()) if 'bow' not in self.aux_lms else self.aux_lms['bow'].parameters()
+        tl = iter(()) if 'bow' not in self.aux_tms else self.aux_tms['bow'].parameters()
+        return chain(sl, tl)
 
     def ibm1_parameters(self):
-        ibm1_gate = iter(()) if self.ibm1_gate is None else self.ibm1_gate.parameters()
-        ibm1_proj = iter(()) if self.ibm1_proj is None else self.ibm1_projection.parameters()
-        return chain(ibm1_gate, ibm1_proj)
+        return iter(()) if 'ibm1' not in self.aux_tms else self.aux_tms['ibm1'].parameters()
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
@@ -229,32 +224,22 @@ class AEVNMT(nn.Module):
     def forward(self, x, seq_mask_x, seq_len_x, y, z):
 
         # Encode the source sentence and initialize the decoder hidden state.
-        x_embed, (encoder_outputs, encoder_final) = self.embed_and_encode(x, seq_len_x, z)
+        encoder_outputs, encoder_final = self.encode(x, seq_len_x, z)
         hidden = self.init_decoder(encoder_outputs, encoder_final, z)
 
         # Estimate the Categorical parameters for E[P(x|z)] using the given sample of the latent
         # variable.
         lm_logits = self.run_language_model(x, z)
 
-        if self.bow_output_layer is not None:
-            bow_logits=self.bow_output_layer(z)
-        else:
-            bow_logits=None
+        # Obtain auxiliary X_i|z, x_{<i}
+        aux_lm_likelihoods = dict()
+        for aux_name, aux_decoder in self.aux_lms.items():
+            aux_lm_likelihoods[aux_name] = aux_decoder(x, z)
 
-        if self.bow_output_layer_tl is not None:
-            bow_logits_tl=self.bow_output_layer_tl(z)
-        else:
-            bow_logits_tl=None
-
-        if self.ibm1_gate is not None:
-            # [B, Tx, Dz]
-            x_gate_for_z = self.ibm1_gate(x_embed)
-            # [B, Tx, Dz]
-            x_for_ibm1 = self.ibm1_proj(x_gate_for_z * z.unsqueeze(1))
-            # [B, Tx, V]
-            ibm1_marginals = - self.nibm1(x_for_ibm1, seq_mask_x, seq_len_x, y.size(1))
-        else:
-            ibm1_marginals = None
+        # Obtain auxiliary Y_j|z, x, y_{<j}
+        aux_tm_likelihoods = dict()
+        for aux_name, aux_decoder in self.aux_tms.items():
+            aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y, z)
 
         # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
         # variable.
@@ -270,7 +255,13 @@ class AEVNMT(nn.Module):
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
 
-        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1),bow_logits,bow_logits_tl, ibm1_marginals
+        return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1), aux_lm_likelihoods, aux_tm_likelihoods
+
+    def log_likelihood_tm(self, comp_name, likelihood: Distribution, y):
+        return self.aux_tms[comp_name].log_likelihood(likelihood, y)
+    
+    def log_likelihood_lm(self, comp_name, likelihood: Distribution, x):
+        return self.aux_lms[comp_name].log_likelihood(likelihood, x)
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
         """
@@ -380,7 +371,7 @@ class AEVNMT(nn.Module):
         return -tm_loss
 
     def loss(self, tm_logits, lm_logits, targets_y, targets_x, qz, free_nats=0.,
-             KL_weight=1., reduction="mean", bow_logits=None, bow_logits_tl=None, ibm1_marginals=None):
+            KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -408,63 +399,40 @@ class AEVNMT(nn.Module):
         # Compute the language model categorical loss.
         lm_loss = self.language_model.loss(lm_logits, targets_x, reduction="none")
 
-        bow_loss=torch.zeros_like(lm_loss)
-        if bow_logits is not None:
-            bow_logprobs=-F.log_softmax(bow_logits,-1)
-            bsz=bow_logits.size(0)
-            for i in range(bsz):
-                bow=torch.unique(targets_x[i])
-                bow_mask=( bow != self.language_model.pad_idx)
-                bow=bow.masked_select(bow_mask)
-                bow_loss[i]=torch.sum( bow_logprobs[i][bow] )
-
-        bow_loss_tl=torch.zeros_like(lm_loss)
-        if bow_logits_tl is not None:
-            bow_logprobs=-F.log_softmax(bow_logits_tl,-1)
-            bsz=bow_logits_tl.size(0)
-            for i in range(bsz):
-                bow=torch.unique(targets_y[i])
-                bow_mask=( bow != self.pad_idx)
-                bow=bow.masked_select(bow_mask)
-                bow_loss_tl[i]=torch.sum( bow_logprobs[i][bow] )
-
-        ibm1_ll = 0.
-        if ibm1_marginals is not None:
-            # [B]
-            ibm1_ll = - self.nibm1.loss(p_marginal, targets_y)
 
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
         pz = self.prior()  #.expand(qz.mean.size())
 
-        # The loss is the negative ELBO.
+        # The loss is the negative ELBO
         tm_log_likelihood = -tm_loss
         lm_log_likelihood = -lm_loss
 
-        bow_log_likelihood = - bow_loss - bow_loss_tl
-
-
-        # TODO: N this is [...,D], whereas with MoG this is [...]
-        #  we need to wrap stuff around torch.distributions.Independent
         KL = torch.distributions.kl.kl_divergence(qz, pz)
         raw_KL = KL * 1
-        #raw_KL = KL.sum(dim=1)
-        #KL = KL.sum(dim=1)
 
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-        elbo = tm_log_likelihood + lm_log_likelihood + bow_log_likelihood + ibm1_ll - KL
-        loss = -elbo
 
-        out_dict = {
-            'tm_log_likelihood': tm_log_likelihood,
-            'lm_log_likelihood': lm_log_likelihood,
-            'bow_log_likelihood': bow_log_likelihood,
-            'ibm1_log_likelihood': ibm1_ll,
-            'KL': KL,
-            'raw_KL': raw_KL
-        }
+        out_dict = dict()
+        out_dict['tm_log_likelihood'] = tm_log_likelihood
+        out_dict['lm_log_likelihood'] = lm_log_likelihood
+        out_dict['KL'] = KL
+        out_dict['raw_KL'] = raw_KL
+        
+        side_loss = 0.
+        # Side losses based on p(x|z)
+        for aux_name, aux_likelihood in aux_lm_likelihoods.items():
+            out_dict['lm/' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
+            side_loss = side_loss - out_dict['lm/' + aux_name]
+        # Side losses based on p(y|z,x)
+        for aux_name, aux_likelihood in aux_tm_likelihoods.items():
+            out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
+            side_loss = side_loss - out_dict['tm/' + aux_name]
+        
+        elbo = tm_log_likelihood + lm_log_likelihood - KL - side_loss
+        loss = -elbo
 
         # Return differently according to the reduction setting.
         if reduction == "mean":
