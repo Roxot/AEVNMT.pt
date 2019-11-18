@@ -47,8 +47,9 @@
     "posterior": "gaussian", 
     "inf_encoder_style": "rnn",  
     "inf_conditioning": "x",
-    "ibm1_loss": true, 
-    "bow_loss": false,
-    "bow_loss_tl": false, 
-    "MADE_loss": false
+    "bow_loss": true,
+    "bow_loss_tl": true, 
+    "MADE_loss": true,
+    "MADE_loss_tl": true,
+    "ibm1_loss": true 
 }

@@ -10,7 +10,8 @@ from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from probabll.distributions import MixtureOfGaussians
 from .inference import get_inference_encoder
 from .inference import InferenceNetwork
-from .generative import GenerativeLM, IndependentLM, GenerativeTM, IBM1TM, IndependentTM, MADELM
+from .generative import GenerativeLM, IndependentLM, CorrelatedBernoullisLM
+from .generative import GenerativeTM, IndependentTM, CorrelatedBernoullisTM, IBM1TM
 from itertools import chain
 
 
@@ -20,7 +21,7 @@ class AEVNMT(nn.Module):
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
             inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, 
-            bow=False, bow_tl=False, ibm1=False, MADE=False):
+            bow=False, bow_tl=False, ibm1=False, MADE=False, MADE_tl=False):
         super().__init__()
         self.feed_z=feed_z
         self.latent_size = latent_size
@@ -65,20 +66,36 @@ class AEVNMT(nn.Module):
         if bow:
             self.bow_sl_decoder = IndependentLM(
                 latent_size=latent_size, 
-                src_vocab_size=self.language_model.embedder.num_embeddings, 
+                vocab_size=self.language_model.embedder.num_embeddings, 
                 pad_idx=pad_idx)
             self.aux_lms['bow'] = self.bow_sl_decoder
         if MADE:
-            self.src_made = MADELM(
+            self.src_made = CorrelatedBernoullisLM(
                 vocab_size=self.language_model.embedder.num_embeddings, 
                 latent_size=latent_size, 
                 hidden_sizes=[decoder.hidden_size, decoder.hidden_size], 
-                pad_idx=pad_idx,
-                num_masks=10)  # TODO: is this okay?
+                pad_idx=pad_idx,  # TODO: is pad_idx the same for both languages?
+                num_masks=10,  # TODO: is this okay?
+                resample_mask_every=10)  # TODO: is this okay?
             self.aux_lms['made'] = self.src_made
 
         # Auxiliary TMs
         self.aux_tms = dict()
+        if bow_tl:
+            self.bow_tl_decoder = IndependentTM(
+                latent_size=latent_size,
+                vocab_size=tgt_vocab_size,
+                pad_idx=pad_idx)
+            self.aux_tms['bow'] = self.bow_tl_decoder
+        if MADE_tl:
+            self.tgt_made = CorrelatedBernoullisTM(
+                vocab_size=self.tgt_embedder.num_embeddings, 
+                latent_size=latent_size, 
+                hidden_sizes=[decoder.hidden_size, decoder.hidden_size], 
+                pad_idx=pad_idx,  # TODO: is pad_idx the same for both languages?
+                num_masks=10,  # TODO: is this okay?
+                resample_mask_every=10)  # TODO: is this okay?
+            self.aux_tms['made'] = self.tgt_made
         if ibm1:
             self.ibm1_decoder = IBM1TM(
                 src_embed=self.language_model.embedder,
@@ -88,12 +105,6 @@ class AEVNMT(nn.Module):
                 tgt_vocab_size=tgt_vocab_size,
                 pad_idx=pad_idx)
             self.aux_tms['ibm1'] = self.ibm1_decoder
-        if bow_tl:
-            self.bow_tl_decoder = IndependentTM(
-                latent_size=latent_size,
-                tgt_vocab_size=tgt_vocab_size,
-                pad_idx=pad_idx)
-            self.aux_tms['bow'] = self.bow_tl_decoder
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -422,20 +433,21 @@ class AEVNMT(nn.Module):
         KL *= KL_weight
 
         out_dict = dict()
-        out_dict['tm_log_likelihood'] = tm_log_likelihood
-        out_dict['lm_log_likelihood'] = lm_log_likelihood
         out_dict['KL'] = KL
         out_dict['raw_KL'] = raw_KL
+        # main log-likelihoods
+        out_dict['tm.main'] = tm_log_likelihood
+        out_dict['lm.main'] = lm_log_likelihood
         
         side_loss = 0.
         # Side losses based on p(x|z)
         for aux_name, aux_likelihood in aux_lm_likelihoods.items():
-            out_dict['lm/' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
-            side_loss = side_loss - out_dict['lm/' + aux_name]
+            out_dict['lm.' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
+            side_loss = side_loss - out_dict['lm.' + aux_name]
         # Side losses based on p(y|z,x)
         for aux_name, aux_likelihood in aux_tm_likelihoods.items():
-            out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
-            side_loss = side_loss - out_dict['tm/' + aux_name]
+            out_dict['tm.' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
+            side_loss = side_loss - out_dict['tm.' + aux_name]
         
         elbo = tm_log_likelihood + lm_log_likelihood - KL - side_loss
         loss = -elbo
