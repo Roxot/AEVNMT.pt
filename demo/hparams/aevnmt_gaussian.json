@@ -41,13 +41,14 @@
     "vocab_min_freq": 0,
     "word_dropout": 0.0,
     "KL_annealing_steps": 0,
-    "KL_free_nats": 10.0, 
+    "KL_free_nats": 5.0, 
     "prior": "gaussian",
     "prior_params": [0.0, 1.0], 
     "posterior": "gaussian", 
     "inf_encoder_style": "rnn",  
     "inf_conditioning": "x",
-    "ibm1_loss": false, 
-    "bow_loss": true,
-    "bow_loss_tl": true
+    "ibm1_loss": true, 
+    "bow_loss": false,
+    "bow_loss_tl": false, 
+    "MADE_loss": false
 }

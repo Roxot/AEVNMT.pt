@@ -103,10 +103,11 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in = create_noisy_batch(
                 sentences_y, vocab_tgt, device,
                 word_dropout=hparams.word_dropout)
-            loss = train_step(
+            return_dict = train_step(
                     model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
                     y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, 
-                    step, summary_writer=summary_writer)["loss"]
+                    step, summary_writer=summary_writer)
+            loss = return_dict["loss"]
 
             # Backpropagate and update gradients.
             loss.backward()
@@ -127,8 +128,17 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 elapsed = time.time() - tokens_start
                 tokens_per_sec = num_tokens / elapsed if step != 0 else 0
                 grad_norm = gradient_norm(model)
+
+                displaying = f"raw KL = {return_dict['raw_KL'].mean().item():,.2f}"
+                for comp_name, comp_value in return_dict.items():
+                    if comp_name.startswith('lm/'):
+                        displaying += f" -- {comp_name} = {-comp_value.mean().item():,.2f}"
+                for comp_name, comp_value in return_dict.items():
+                    if comp_name.startswith('tm/'):
+                        displaying += f" -- {comp_name} = {-comp_value.mean().item():,.2f}"
                 print(f"({epoch_num}) step {step}: "
                        f"training loss = {total_train_loss/num_sentences:,.2f} -- "
+                       f"{displaying} -- "
                        f"{tokens_per_sec:,.0f} tokens/s -- "
                        f"gradient norm = {grad_norm:.2f}")
                 summary_writer.add_scalar("train/loss",

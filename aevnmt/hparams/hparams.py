@@ -82,6 +82,7 @@ options = {
 
     "bow_loss":(bool, False, False, "Add SL bag-of-words term to the loss", 1),
     "bow_loss_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
+    "MADE_loss":(bool, False, False, "Add SL MADE term to the loss", 1),
     
     "ibm1_loss":(bool, False, False, "Side loss based on IBM1-style likelihood p(y|x,z)", 1),
 

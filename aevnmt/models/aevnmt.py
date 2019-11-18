@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Distribution, Independent, Categorical
+from torch.distributions import Distribution, Independent, Categorical, Bernoulli
 
 from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
 from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
@@ -10,7 +10,7 @@ from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from probabll.distributions import MixtureOfGaussians
 from .inference import get_inference_encoder
 from .inference import InferenceNetwork
-from .generative import GenerativeLM, IndependentLM, GenerativeTM, IBM1TM, IndependentTM
+from .generative import GenerativeLM, IndependentLM, GenerativeTM, IBM1TM, IndependentTM, MADELM
 from itertools import chain
 
 
@@ -20,7 +20,7 @@ class AEVNMT(nn.Module):
     def __init__(self, tgt_vocab_size, emb_size, latent_size, encoder, decoder, language_model,
             pad_idx, dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
             inf_encoder_style: str, inf_conditioning: str,feed_z=False,max_pool=False, 
-            bow=False, bow_tl=False, ibm1=False):
+            bow=False, bow_tl=False, ibm1=False, MADE=False):
         super().__init__()
         self.feed_z=feed_z
         self.latent_size = latent_size
@@ -68,6 +68,14 @@ class AEVNMT(nn.Module):
                 src_vocab_size=self.language_model.embedder.num_embeddings, 
                 pad_idx=pad_idx)
             self.aux_lms['bow'] = self.bow_sl_decoder
+        if MADE:
+            self.src_made = MADELM(
+                vocab_size=self.language_model.embedder.num_embeddings, 
+                latent_size=latent_size, 
+                hidden_sizes=[decoder.hidden_size, decoder.hidden_size], 
+                pad_idx=pad_idx,
+                num_masks=10)  # TODO: is this okay?
+            self.aux_lms['made'] = self.src_made
 
         # Auxiliary TMs
         self.aux_tms = dict()
@@ -139,15 +147,13 @@ class AEVNMT(nn.Module):
     def generative_parameters(self):
         # TODO: separate the generative model into a GenerativeModel module
         #  within that module, have two modules, namely, LanguageModel and TranslationModel
-        return chain(self.lm_parameters(), self.tm_parameters(), self.bow_parameters(), self.ibm1_parameters())
+        return chain(self.lm_parameters(), self.tm_parameters(), self.aux_lm_parameters(), self.aux_tm_parameters())
 
-    def bow_parameters(self):
-        sl = iter(()) if 'bow' not in self.aux_lms else self.aux_lms['bow'].parameters()
-        tl = iter(()) if 'bow' not in self.aux_tms else self.aux_tms['bow'].parameters()
-        return chain(sl, tl)
-
-    def ibm1_parameters(self):
-        return iter(()) if 'ibm1' not in self.aux_tms else self.aux_tms['ibm1'].parameters()
+    def aux_lm_parameters(self):
+        return chain(*[model.parameters() for model in self.aux_lms.values()])
+    
+    def aux_tm_parameters(self):
+        return chain(*[model.parameters() for model in self.aux_tms.values()])
 
     def lm_parameters(self):
         return chain(self.language_model.parameters(), self.lm_init_layer.parameters())
@@ -258,10 +264,10 @@ class AEVNMT(nn.Module):
         return torch.cat(tm_logits, dim=1), lm_logits, torch.cat(all_att_weights, dim=1), aux_lm_likelihoods, aux_tm_likelihoods
 
     def log_likelihood_tm(self, comp_name, likelihood: Distribution, y):
-        return self.aux_tms[comp_name].log_likelihood(likelihood, y)
+        return self.aux_tms[comp_name].log_prob(likelihood, y)
     
     def log_likelihood_lm(self, comp_name, likelihood: Distribution, x):
-        return self.aux_lms[comp_name].log_likelihood(likelihood, x)
+        return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
         """

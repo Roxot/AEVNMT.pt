@@ -61,6 +61,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                    max_pool=hparams.max_pooling_states,
                    bow=hparams.bow_loss,
                    bow_tl=hparams.bow_loss_tl,
+                   MADE=hparams.MADE_loss,
                    ibm1=hparams.ibm1_loss)
     return model
 
@@ -268,7 +269,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 batch_log_marginals['main/tm'][s] = log_tm_prob + log_pz - log_qz
                 
                 for aux_comp, aux_px_z in aux_lm_likelihoods.items():
-                    batch_log_marginals['aux/lm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
+                    batch_log_marginals['aux/lm/' + aux_comp][s] = model.log_likelihood_lm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
                 for aux_comp, aux_py_xz in aux_tm_likelihoods.items():
                     batch_log_marginals['aux/tm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
 
