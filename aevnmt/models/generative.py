@@ -5,16 +5,14 @@ AEVNMT has two generative components, namely,
 
 These are also known as decoders or generators, here we provide implementations for those.
 """
-
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical, Bernoulli
-from .nibm1 import NeuralIBM1
-
 from dgm.conditional import MADEConditioner
 from dgm.likelihood import AutoregressiveLikelihood
+
+from aevnmt.components.nibm1 import NeuralIBM1
 
 
 class GenerativeLM(nn.Module):

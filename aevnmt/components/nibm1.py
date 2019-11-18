@@ -1,3 +1,10 @@
+"""
+This implements a neural version of an IBM1 likelihood, that is, 
+
+    P(y|x) = \prod_{j=1}^n \sum_{i=1}^m P(a_j=i)P(y_j|x_i)
+
+where n = |y|, m = |x|, P(a_j) = 1/m, and P(y_j|x_i) = Cat(y_j|NN(x_i)).
+"""
 import torch
 import torch.nn as nn
 import torch.functional as F
@@ -20,8 +27,7 @@ class NeuralIBM1(nn.Module):
 
     def forward(self, x, seq_mask_x, seq_len_x, longest_y):
         """
-        Returns a batch of marginal distributions Y_j | x with shape [B, Ty, V].
-        
+        Return a batch of marginal probabilities for distributions Y_j | x with shape [B, Ty, V].
 
         x: [B, Tx, Dx]
         seq_mask_x: [B, Tx]
@@ -51,7 +57,7 @@ class NeuralIBM1(nn.Module):
         # [B, Ty, Vy]
         p_marginal = torch.bmm(p_align, py_given_xa)
 
-        return p_marginal  # TODO return a torch.distributions.Categorical
+        return p_marginal
     
     def loss(self, p_marginal, y):
         """

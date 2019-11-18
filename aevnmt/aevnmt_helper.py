@@ -113,7 +113,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     val_dl = BucketingParallelDataLoader(val_dl)
 
     val_ppl, val_KL, val_NLLs = _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device)
-    val_NLL = val_NLLs['joint.main']
+    val_NLL = val_NLLs['joint/main']
     val_bleu, inputs, refs, hyps = _evaluate_bleu(model, val_dl, vocab_src, vocab_tgt,
                                                   device, hparams)
 
@@ -122,11 +122,11 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     nll_str = f""
     # - log P(x|z) for the various source LM decoders
     for comp_name, comp_nll in sorted(val_NLLs.items()):
-        if comp_name.startswith('lm.'):
+        if comp_name.startswith('lm/'):
             nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
     # - log P(y|z,x) for the various translation decoders
     for comp_name, comp_nll in sorted(val_NLLs.items()):
-        if comp_name.startswith('tm.'):
+        if comp_name.startswith('tm/'):
             nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
     print(f"direction = {title}\n"
           f"validation perplexity = {val_ppl:,.2f}"
@@ -154,7 +154,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
         summary_writer.add_scalar(f"{title}/validation/perplexity", val_ppl, step)
         summary_writer.add_scalar(f"{title}/validation/KL", val_KL, step)
         for comp_name, comp_value in val_NLLs.items():
-            summary_writer.add_scalar(f"{title}/validation/{comp_name}", comp_value, step)
+            summary_writer.add_scalar(f"{title}/validation/NLL/{comp_name}", comp_value, step)
 
         # Log the attention weights of the first validation sentence.
         with torch.no_grad():
@@ -274,14 +274,14 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
-                batch_log_marginals['joint.main'][s] = log_tm_prob + log_lm_prob + log_pz - log_qz
-                batch_log_marginals['lm.main'][s] = log_lm_prob + log_pz - log_qz
-                batch_log_marginals['tm.main'][s] = log_tm_prob + log_pz - log_qz
+                batch_log_marginals['joint/main'][s] = log_tm_prob + log_lm_prob + log_pz - log_qz
+                batch_log_marginals['lm/main'][s] = log_lm_prob + log_pz - log_qz
+                batch_log_marginals['tm/main'][s] = log_tm_prob + log_pz - log_qz
                 
                 for aux_comp, aux_px_z in aux_lm_likelihoods.items():
-                    batch_log_marginals['lm.' + aux_comp][s] = model.log_likelihood_lm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
+                    batch_log_marginals['lm/' + aux_comp][s] = model.log_likelihood_lm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
                 for aux_comp, aux_py_xz in aux_tm_likelihoods.items():
-                    batch_log_marginals['tm.' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
+                    batch_log_marginals['tm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
 
             for comp_name, log_marginals in batch_log_marginals.items():
                 # Average over all samples.
@@ -291,7 +291,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
             num_sentences += batch_size
             num_predictions += (seq_len_x.sum() + seq_len_y.sum()).item()
 
-    val_NLL = -log_marginal['joint.main']
+    val_NLL = -log_marginal['joint/main']
     val_perplexity = np.exp(val_NLL / num_predictions)
 
     NLLs = {comp_name: -value / num_sentences for comp_name, value in log_marginal.items()}

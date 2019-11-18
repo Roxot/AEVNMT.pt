@@ -132,11 +132,11 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 displaying = f"raw KL = {return_dict['raw_KL'].mean().item():,.2f}"
                 # - log P(x|z) for the various source LM decoders
                 for comp_name, comp_value in sorted(return_dict.items()):
-                    if comp_name.startswith('lm.'):
+                    if comp_name.startswith('lm/'):
                         displaying += f" -- {comp_name} = {-comp_value.mean().item():,.2f}"
                 # - log P(y|z,x) for the various translation decoders
                 for comp_name, comp_value in sorted(return_dict.items()):
-                    if comp_name.startswith('tm.'):
+                    if comp_name.startswith('tm/'):
                         displaying += f" -- {comp_name} = {-comp_value.mean().item():,.2f}"
                 print(f"({epoch_num}) step {step}: "
                        f"training loss = {total_train_loss/num_sentences:,.2f} -- "

@@ -436,19 +436,24 @@ class AEVNMT(nn.Module):
         out_dict['KL'] = KL
         out_dict['raw_KL'] = raw_KL
         # main log-likelihoods
-        out_dict['tm.main'] = tm_log_likelihood
-        out_dict['lm.main'] = lm_log_likelihood
+        out_dict['tm/main'] = tm_log_likelihood
+        out_dict['lm/main'] = lm_log_likelihood
         
         side_loss = 0.
         # Side losses based on p(x|z)
         for aux_name, aux_likelihood in aux_lm_likelihoods.items():
-            out_dict['lm.' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
-            side_loss = side_loss - out_dict['lm.' + aux_name]
+            out_dict['lm/' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
+            side_loss = side_loss - out_dict['lm/' + aux_name]
         # Side losses based on p(y|z,x)
         for aux_name, aux_likelihood in aux_tm_likelihoods.items():
-            out_dict['tm.' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
-            side_loss = side_loss - out_dict['tm.' + aux_name]
-        
+            out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
+            side_loss = side_loss - out_dict['tm/' + aux_name]
+       
+        # If mixture_likelihood
+        #  E_q[ \log \sum_c w_c P(x|z,c) P(y|z,x,c)] - KL(q(z) || p(z))
+        # Else
+        #  E_q[ \log P(x|z,c=main) P(y|z,x,c=main)] - KL(q(z) || p(z)) + E_q[\sum_{c not main} log P(x|z,c) + log P(y|z,x,c) ]
+
         elbo = tm_log_likelihood + lm_log_likelihood - KL - side_loss
         loss = -elbo
 
