@@ -84,6 +84,8 @@ options = {
     "bow_loss_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
     "MADE_loss":(bool, False, False, "Add SL MADE term to the loss", 1),
     "MADE_loss_tl":(bool, False, False, "Add TL MADE term to the loss", 1),
+    "count_MADE_loss":(bool, False, False, "Add SL count MADE term to the loss", 1),
+    "count_MADE_loss_tl":(bool, False, False, "Add TL count MADE term to the loss", 1),
     "shuffle_lm":(bool, False, False, "z is also used to produce source sentences with a shuffled LM instead of a reverse LM", 1),
     "shuffle_lm_tl":(bool, False, False, "z is also used to produce target sentences with a shuffled LM instead of a reverse LM", 1),
     "shuffle_lm_keep_bpe":(bool, False, False, "Shuffle whole words instead of BPE fragments.", 1),

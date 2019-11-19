@@ -5,23 +5,20 @@ from itertools import chain
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Distribution, Independent, Categorical, Bernoulli
+from torch.distributions import Distribution, Independent, Categorical 
 
-from aevnmt.components import RNNEncoder, tile_rnn_hidden, tile_rnn_hidden_for_decoder
-from aevnmt.components.nli import DecomposableAttentionEncoder as NLIEncoder
 from aevnmt.dist import get_named_params
-from aevnmt.dist import NormalLayer, KumaraswamyLayer
 
 from .generative import GenerativeLM, GenerativeTM
-from .inference import InferenceEncoder, InferenceModel
+from .inference import InferenceModel
 
 from probabll.distributions import MixtureOfGaussians
 
 
 class AEVNMT(nn.Module):
 
-    def __init__(self, latent_size, src_embedder, tgt_embedder, encoder, decoder, 
-            language_model: GenerativeLM, inference_model: InferenceModel,
+    def __init__(self, latent_size, src_embedder, tgt_embedder, 
+            language_model: GenerativeLM, translation_model: GenerativeTM, inference_model: InferenceModel,
             dropout, tied_embeddings, prior_family: str, prior_params: list, 
             feed_z=False,  
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
@@ -31,22 +28,8 @@ class AEVNMT(nn.Module):
         self.tgt_embedder = tgt_embedder
         self.latent_size = latent_size
         self.language_model = language_model
+        self.translation_model = translation_model
         self.inference_model = inference_model
-        
-        # TODO: use new GenerativeTM abstraction
-        # v
-        self.encoder = encoder  
-        self.decoder = decoder
-        self.feed_z = feed_z
-        self.tied_embeddings = tied_embeddings
-        if not tied_embeddings:
-            self.output_matrix = nn.Parameter(torch.randn(tgt_embedder.num_embeddings, decoder.hidden_size))
-        self.dropout_layer = nn.Dropout(p=dropout)
-        self.encoder_init_layer = nn.Sequential(nn.Linear(latent_size, encoder.hidden_size),
-                                                nn.Tanh())
-        self.decoder_init_layer = nn.Sequential(nn.Linear(latent_size, decoder.hidden_size),
-                                                nn.Tanh())
-        # ^
 
         self.mixture_likelihood = mixture_likelihood
         self.mixture_likelihood_dir_prior = mixture_likelihood_dir_prior
@@ -118,14 +101,7 @@ class AEVNMT(nn.Module):
         return chain(self.src_embedder.parameters(), self.language_model.parameters())  
 
     def tm_parameters(self):
-        params = chain(self.encoder.parameters(),
-                     self.decoder.parameters(),
-                     self.tgt_embedder.parameters(),
-                     self.encoder_init_layer.parameters(),
-                     self.decoder_init_layer.parameters())
-        if not self.tied_embeddings:
-            params = chain(params, [self.output_matrix])
-        return params
+        return chain(self.tgt_embedder.parameters(), self.translation_model.parameters())
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
@@ -133,7 +109,7 @@ class AEVNMT(nn.Module):
         """
         return self.inference_model(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
 
-    def prior(self) -> torch.distributions.Distribution:
+    def prior(self) -> Distribution:
         if self.prior_family == "gaussian":
             p = Independent(torch.distributions.Normal(loc=self.prior_loc, scale=self.prior_scale), 1)
         elif self.prior_family == "beta":
@@ -143,8 +119,7 @@ class AEVNMT(nn.Module):
         return p
 
     def src_embed(self, x):
-        # We share the source embeddings with the language_model.
-        x_embed = self.language_model.embedder(x)
+        x_embed = self.src_embedder(x)
         x_embed = self.dropout_layer(x_embed)
         return x_embed
 
@@ -153,29 +128,21 @@ class AEVNMT(nn.Module):
         y_embed = self.dropout_layer(y_embed)
         return y_embed
 
-    def encode(self, x, seq_len_x, z):
-        x_embed = self.src_embed(x)
-        hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
-        return self.encoder(x_embed, seq_len_x, hidden=hidden)
-
-    def init_decoder(self, encoder_outputs, encoder_final, z):
-        self.decoder.init_decoder(encoder_outputs, encoder_final)
-        hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
-        return hidden
-
-    def generate(self, pre_output):
-        W = self.tgt_embedder.weight if self.tied_embeddings else self.output_matrix
-        return F.linear(pre_output, W)
-
     def forward(self, x, seq_mask_x, seq_len_x, y, z):
+        """
+        Run all components of the model and return parameterised distributions.
 
-        # Encode the source sentence and initialize the decoder hidden state.
-        encoder_outputs, encoder_final = self.encode(x, seq_len_x, z)
-        hidden = self.init_decoder(encoder_outputs, encoder_final, z)
+        Returns:
+            tm_likelihood: Categorical distributions Y_j|x,z, y_{<j} with shape [B, Ty, Vy]
+            lm_likelihood: Categorical distributions X_i|z,x_{<i} with shape [B, Tx, Vx]
+            state: a dictionary with information from decoders' forward passes (e.g. `att_weights`)
+            aux_lm_likelihoods: dictionary mapping auxiliary LMs to their parameterised distributions
+            aux_tm_likelihoods: dictionary mapping auxiliary TMs to their parameterised distributions
+        """
 
-        # Estimate the Categorical parameters for E[P(x|z)] using the given sample of the latent
-        # variable.
-        lm_likelihood = self.language_model(x, z)
+        state = dict()
+        lm_likelihood = self.language_model(x, z, state)
+        tm_likelihood = self.translation_model(x, seq_mask_x, seq_len_x, y, z, state)
 
         # Obtain auxiliary X_i|z, x_{<i}
         aux_lm_likelihoods = dict()
@@ -189,21 +156,7 @@ class AEVNMT(nn.Module):
             # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y_shuff, z)
             aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y, z)
 
-        # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
-        # variable.
-        tm_logits = []
-        all_att_weights = []
-        max_time = y.size(1)
-        for t in range(max_time):
-            prev_y = y[:, t]
-            y_embed = self.tgt_embed(prev_y)
-            pre_output, hidden, att_weights = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs,z=z if self.feed_z else None)
-            logits = self.generate(pre_output)
-            tm_logits.append(logits)
-            all_att_weights.append(att_weights)
-
-        return torch.cat(tm_logits, dim=1), lm_likelihood, torch.cat(all_att_weights, dim=1), aux_lm_likelihoods, aux_tm_likelihoods
+        return tm_likelihood, lm_likelihood, state, aux_lm_likelihoods, aux_tm_likelihoods
 
     def log_likelihood_tm(self, comp_name, likelihood: Distribution, y):
         # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_lm_likelihoods[aux_name] = aux_decoder(x_shuff, z)
@@ -213,130 +166,35 @@ class AEVNMT(nn.Module):
         # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y_shuff, z)
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
-    def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
-        """
-        :param x_in: [batch_size, max_length]
-        :param seq_mask_x: [batch_size, max_length]
-        :param seq_len_x: [batch_size]
-        :param x_out: [batch_size, max_length]
-        :param y_in: [batch_size, max_length]
-        :param y_out: [batch_size, max_length]
-        :param z: [batch_size, latent_size]
-        :return: log p(x|z), log p(y|z,x)
-        """
-        # Encode the source sentence and initialize the decoder hidden state.
-        encoder_outputs, encoder_final = self.encode(x_in, seq_len_x, z)
-        hidden = self.init_decoder(encoder_outputs, encoder_final, z)
-
-        # [B]
-        lm_log_likelihood = self.language_model.log_prob(self.language_model(x_in, z), x_out)
-
-        # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
-        # variable.
-        tm_logits = []
-        max_time = y_in.size(1)
-        for t in range(max_time):
-            prev_y = y_in[:, t]
-            y_embed = self.tgt_embed(prev_y)
-            pre_output, hidden, _ = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs,z=z if self.feed_z else None)
-            logits = self.generate(pre_output)
-            tm_logits.append(logits)
-        # [max_length, batch_size, vocab_size]
-        tm_logits = torch.cat(tm_logits, dim=1)
-        # [batch_size, max_length, vocab_size]
-        tm_logits = tm_logits.permute(0, 2, 1)
-        # [batch_size]
-        tm_loss = F.cross_entropy(tm_logits, y_out, ignore_index=self.tgt_embedder.padding_idx, reduction="none").sum(dim=1)
-
-        return lm_log_likelihood, -tm_loss
-
-    def compute_lm_likelihood(self, x_in, seq_mask_x, seq_len_x, x_out, z):
-        """
-        :param x_in: [batch_size, max_length]
-        :param seq_mask_x: [batch_size, max_length]
-        :param seq_len_x: [batch_size]
-        :param x_out: [batch_size, max_length]
-        :param y_in: [batch_size, max_length]
-        :param y_out: [batch_size, max_length]
-        :param z: [batch_size, latent_size]
-        :return: log p(x|z)
-        """
-        # [B]
-        return self.language_model.log_prob(self.language_model(x_in, z), x_out)
-
-    def compute_tm_likelihood(self, x_in, seq_mask_x, seq_len_x, y_in, y_out, z):
-        """
-        :param x_in: [batch_size, max_length]
-        :param seq_mask_x: [batch_size, max_length]
-        :param seq_len_x: [batch_size]
-        :param x_out: [batch_size, max_length]
-        :param y_in: [batch_size, max_length]
-        :param y_out: [batch_size, max_length]
-        :param z: [batch_size, latent_size]
-        :return: log p(x|z), log p(y|z,x)
-        """
-        # Encode the source sentence and initialize the decoder hidden state.
-        encoder_outputs, encoder_final = self.encode(x_in, seq_len_x, z)
-        hidden = self.init_decoder(encoder_outputs, encoder_final, z)
-
-        # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
-        # variable.
-        tm_logits = []
-        max_time = y_in.size(1)
-        for t in range(max_time):
-            prev_y = y_in[:, t]
-            y_embed = self.tgt_embed(prev_y)
-            pre_output, hidden, _ = self.decoder.step(y_embed, hidden, seq_mask_x,
-                                                                encoder_outputs)
-            logits = self.generate(pre_output)
-            tm_logits.append(logits)
-        # [max_length, batch_size, vocab_size]
-        tm_logits = torch.cat(tm_logits, dim=1)
-
-        # [batch_size, max_length, vocab_size]
-        tm_logits = tm_logits.permute(0, 2, 1)
-
-        # [batch_size]
-        tm_loss = F.cross_entropy(tm_logits, y_out, ignore_index=self.tgt_embedder.padding_idx, reduction="none").sum(dim=1)
-
-        return -tm_loss
-
-    def loss(self, tm_logits, lm_likelihood: Categorical, targets_y, targets_x, qz, free_nats=0.,
-            KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
+    def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
+            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
         that the sample comes from.
 
-        :param tm_logits: translation model logits, the unnormalized translation probabilities [B, T_y, vocab_size]
-        :param lm_logits: language model logits, the unnormalized language probabilities [B, T_x, vocab_size]
+        :param tm_likelihood: Categorical distributions from LM with shape [B, Ty, Vy]
+        :param lm_likelihood: Categorical distributions from TM with shape [B, Tx, Vx]
         :param targets_y: target labels target sentence [B, T_y]
         :param targets_x: target labels source sentence [B, T_x]
         :param qz: distribution that was used to sample the latent variable.
         :param free_nats: KL = min(free_nats, KL)
         :param KL_weight: weight to multiply the KL with, applied after free_nats
         :param reduction: what reduction to apply, none ([B]), mean ([]) or sum ([])
-        :param bow_logits: [B,src_vocab_size]
-        :param bow_logits_tl: [B,tgt_vocab_size]
-        :param ibm1_marginals: [B, T_y, tgt_vocab_size]
+        :param aux_lm_likelihoods: a dictionary with LM likelihoods
+        :param aux_tm_likelihoods: a dictionary with TM likelihoods
         """
+        # [B]
+        tm_log_likelihood = self.translation_model.log_prob(tm_likelihood, targets_y)
+        tm_loss = - tm_log_likelihood
 
-        # Compute the loss for each batch element. Logits are of the form [B, T, vocab_size],
-        # whereas the cross-entropy function wants a loss of the form [B, vocab_svocab_sizee, T].
-        tm_logits = tm_logits.permute(0, 2, 1)
-        tm_loss = F.cross_entropy(tm_logits, targets_y, ignore_index=self.tgt_embedder.padding_idx, reduction="none")
-        tm_loss = tm_loss.sum(dim=1)
-        tm_log_likelihood = -tm_loss
-
-        # Compute the language model categorical loss.
-        #lm_loss = self.language_model.loss(lm_logits, targets_x, reduction="none")
+        # [B]
         lm_log_likelihood = self.language_model.log_prob(lm_likelihood, targets_x)
         lm_loss = - lm_log_likelihood
 
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
-        pz = self.prior()  #.expand(qz.mean.size())
+        pz = self.prior()
 
         KL = torch.distributions.kl.kl_divergence(qz, pz)
         raw_KL = KL * 1

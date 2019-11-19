@@ -8,7 +8,8 @@ These are also known as decoders or generators, here we provide implementations 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Distribution, Categorical, Bernoulli
+from torch.distributions import Distribution, Categorical, Bernoulli, Poisson
+from dgm import register_conditional_parameterization
 from dgm.conditional import MADEConditioner
 from dgm.likelihood import AutoregressiveLikelihood
 from .rnnlm import RNNLM
@@ -29,12 +30,14 @@ class GenerativeLM(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, x, z) -> Distribution:
+    def forward(self, x, z, state=dict()) -> Distribution:
         """
         Return distributions X_i|z, x_{<i}.
 
         x: [B, Tx] token ids
         z: [B, Dz] stochastic embeddings
+        state: use this dictionary to return something about the forward pass (for example, 
+            attention weights, or other details of the computation that you whish to log)
         """
         raise NotImplementedError("Implement me!")
 
@@ -60,7 +63,7 @@ class IndependentLM(GenerativeLM):
         self.pad_idx = pad_idx
         self.output_layer = nn.Linear(latent_size, vocab_size, bias=True)
     
-    def forward(self, x, z) -> Categorical:
+    def forward(self, x, z, state=dict()) -> Categorical:
         """
         Return Categorical distributions
             X_i|z ~ Cat(f(z))
@@ -92,6 +95,7 @@ class CorrelatedBernoullisLM(GenerativeLM):
         self.pad_idx = pad_idx
         self.resample_every = resample_mask_every
         self.counter = resample_mask_every
+        self.vocab_size = vocab_size
         self.made_conditioner = MADEConditioner(
             input_size=vocab_size + latent_size, 
             output_size=vocab_size,  
@@ -105,29 +109,101 @@ class CorrelatedBernoullisLM(GenerativeLM):
             conditioner=self.made_conditioner
         )
 
-    def forward(self, x, z) -> Bernoulli:
+    def make_indicators(self, x):
+        """Return a vocab_size-dimensional bit-vector view of x"""
+        # We convert ids to V-dimensional one-hot vectors and reduce-sum the time dimension
+        #  this gives us word counts 
+        # [B, T] -> [B, T, V] -> [B, V]
+        word_counts = F.one_hot(x, self.vocab_size).sum(1) 
+        word_counts[:, self.pad_idx] = 0
+        indicators = (word_counts > 0).float()
+        return indicators
+
+    def forward(self, x, z, state=dict()) -> Bernoulli:
         """
         Return Bernoulli distributions 
             [v \in X]|z, \Sigma_{<v} ~ Bernoulli(b_v(z, \Sigma_{<v}))
         with shape [B, Vx] where Vx = |\Sigma| and \Sigma is the vocabulary.
         """
-        bsz = x.size(0)
-        seq_mask_x = x != self.pad_idx
-        made_input = torch.zeros((bsz, self.product_of_bernoullis.event_size), device=x.device)
-        for i in range(bsz):
-            bow = torch.unique(x[i] * seq_mask_x[i].type_as(x[i]))
-            made_input[i][bow] = 1.0
+        # We convert ids to V-dimensional one-hot vectors and sum the time dimension
+        #  this gives us word counts 
+        # [B, V]
+        indicators = self.make_indicators(x)
         if self.resample_every > 0:
             self.counter = self.counter - 1 if self.counter > 0 else self.resample_every
-        return self.product_of_bernoullis(z, history=made_input, resample_mask=self.resample_every > 0 and self.counter == 0)
+        return self.product_of_bernoullis(z, history=indicators, resample_mask=self.resample_every > 0 and self.counter == 0)
 
     def log_prob(self, likelihood: Bernoulli, x):
-        bsz = x.size(0)
-        made_ref = torch.zeros((bsz,self.product_of_bernoullis.event_size),device=x.device)
-        for i in range(bsz):
-            bow = torch.unique(x[i])
-            made_ref[i][bow] = 1.0
-        return likelihood.log_prob(made_ref).sum(-1)
+        # [B, V]
+        indicators = self.make_indicators(x)
+        # [B, V] -> [B]
+        return likelihood.log_prob(indicators).sum(-1)
+
+
+@register_conditional_parameterization(Poisson)
+def make_poisson(inputs, event_size):
+    assert inputs.size(-1) == event_size, "Expected [...,%d] got [...,%d]" % (event_size, inputs.size(-1))
+    # we clamp the Poisson rate to [1e-6, 30] to prevent instabilities 
+    # this is relatively mild (as we don't expect many words to be repeat 30 times or more on average)
+    return Poisson(torch.clamp(F.softplus(inputs), min=1e-6, max=30))
+
+
+class CorrelatedPoissonsLM(GenerativeLM):
+    """
+    This parameterises an autoregressive product of Poisson distributions,
+        P(x|z) = \prod_{v=1}^V Bern(c_v(x)|b_v(z, x))
+    where V is the vocabulary size, c_v(x) counts the occurrences of v in x,
+    and b(z,x) \in (0, infty)^V is autoregressive in x (we use a MADE).
+    """
+
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+        super().__init__()
+        self.pad_idx = pad_idx
+        self.resample_every = resample_mask_every
+        self.counter = resample_mask_every
+        self.vocab_size = vocab_size
+        self.made_conditioner = MADEConditioner(
+            input_size=vocab_size + latent_size, 
+            output_size=vocab_size,  
+            context_size=latent_size,
+            hidden_sizes=hidden_sizes,
+            num_masks=num_masks
+        )
+        self.product_of_poissons = AutoregressiveLikelihood(
+            event_size=vocab_size, 
+            dist_type=Poisson,
+            conditioner=self.made_conditioner
+        )
+
+    def make_counts(self, x):
+        """Return a vocab_size-dimensional count-vector view of x"""
+        # We convert ids to V-dimensional one-hot vectors and reduce-sum the time dimension
+        #  this gives us word counts 
+        # [B, T] -> [B, T, V] -> [B, V]
+        word_counts = F.one_hot(x, self.vocab_size).sum(1) 
+        word_counts[:, self.pad_idx] = 0  # we could actually leave it here, it is a way to model length
+        return word_counts.float()
+
+    def forward(self, x, z, state=dict()) -> Poisson:
+        """
+        Return Poisson distributions 
+            c_v(X)|z, \Sigma_{<v} ~ Poisson(b_v(z, \Sigma_{<v}))
+        with shape [B, Vx] where Vx = |\Sigma| and \Sigma is the vocabulary.
+        """
+        # We convert ids to V-dimensional one-hot vectors and sum the time dimension
+        #  this gives us word counts 
+        # [B, V]
+        counts = self.make_counts(x)
+        if self.resample_every > 0:
+            self.counter = self.counter - 1 if self.counter > 0 else self.resample_every
+        return self.product_of_poissons(z, history=counts, resample_mask=self.resample_every > 0 and self.counter == 0)
+
+    def log_prob(self, likelihood: Poisson, x):
+        # [B, V]
+        counts = self.make_counts(x)
+        # [B, V] -> [B]
+        return likelihood.log_prob(counts).sum(-1)
+
 
 class CorrelatedCategoricalsLM(GenerativeLM):
     """
@@ -182,7 +258,7 @@ class CorrelatedCategoricalsLM(GenerativeLM):
             outputs.append(logits)
         return torch.cat(outputs, dim=1)
 
-    def forward(self, x, z) -> Categorical:
+    def forward(self, x, z, state=dict()) -> Categorical:
         """
         Return Categorical distributions
             X_i|z, x_{<i} ~ Cat(f(z, x_{<i}))
@@ -209,7 +285,7 @@ class GenerativeTM(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, x, seq_mask_x, seq_len_x, y, z) -> Distribution:
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Distribution:
         """
         Return distributions Y_j|z,x,y_{<j}.
 
@@ -218,6 +294,8 @@ class GenerativeTM(nn.Module):
         seq_len_x: [B] length of source sequences
         y: [B, Ty] target token ids
         z: [B, Dz] stochastic embedding
+        state: use this dictionary to return something about the forward pass (for example, 
+            attention weights, or other details of the computation that you whish to log)
         """
         raise NotImplementedError("Implement me!")
 
@@ -245,7 +323,7 @@ class IndependentTM(GenerativeTM):
             vocab_size=vocab_size, 
             pad_idx=pad_idx)
     
-    def forward(self, x, seq_mask_x, seq_len_x, y, z) -> Categorical:
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Categorical:
         return self.tgt_independent_lm(y, z)
     
     def log_prob(self, likelihood: Categorical, y):
@@ -272,11 +350,40 @@ class CorrelatedBernoullisTM(GenerativeTM):
             resample_mask_every=resample_mask_every
         )
 
-    def forward(self, x, seq_mask_x, seq_len_x, y, z) -> Bernoulli:
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Bernoulli:
         return self.correlated_bernoullis_lm(y, z)
 
     def log_prob(self, likelihood: Bernoulli, y):
         return self.correlated_bernoullis_lm.log_prob(likelihood, y)
+
+
+class CorrelatedPoissonsTM(GenerativeTM):
+    """
+
+    P(y|z,x) = \prod_{v=1}^V Poisson(c_v(y)|b_v(z, y))
+
+    where V is the vocabulary size, c_v(y) returns the number of occurrences of v in y,
+        and b(z,x) \in (0, infty)^V is autoregressive in y (we use a MADE).
+
+    Note that for now the parameterisation ignores x.
+    """
+
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+        super().__init__()
+        self.correlated_poissons_lm = CorrelatedPoissonsLM(
+            vocab_size=vocab_size,
+            latent_size=latent_size,
+            hidden_sizes=hidden_sizes,
+            pad_idx=pad_idx,
+            num_masks=num_masks,
+            resample_mask_every=resample_mask_every
+        )
+
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Poisson:
+        return self.correlated_poissons_lm(y, z)
+
+    def log_prob(self, likelihood: Poisson, y):
+        return self.correlated_poissons_lm.log_prob(likelihood, y)
 
 class CorrelatedCategoricalsTM(GenerativeTM):
     """
@@ -300,7 +407,7 @@ class CorrelatedCategoricalsTM(GenerativeTM):
             gate_z=gate_z
         )
 
-    def forward(self, x, seq_mask_x, seq_len_x, y, z) -> Categorical:
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Categorical:
         return self.correlated_categoricals_lm(y, z)
 
     def log_prob(self, likelihood: Categorical, y):
@@ -329,7 +436,7 @@ class IBM1TM(GenerativeTM):
         self.proj = nn.Sequential(nn.Linear(latent_size, latent_size), nn.Tanh())
         self.nibm1 = NeuralIBM1(src_vocab_size, tgt_vocab_size, latent_size, hidden_size, pad_idx)
 
-    def forward(self, x, seq_mask_x, seq_len_x, y, z) -> Categorical:
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Categorical:
         """
         Return Categorical distributions
             Y_j|z,x
@@ -411,9 +518,11 @@ class AttentionBasedTM(GenerativeTM):
             logits = self.generate(pre_output)
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
-        state['all_att_weights'] = torch.cat(all_att_weights, dim=1)
+        state['att_weights'] = torch.cat(all_att_weights, dim=1)
         # [B, Ty, Vy]
-        return Categorical(torch.cat(tm_logits, dim=1))
+        return Categorical(logits=torch.cat(tm_logits, dim=1))
 
     def log_prob(self, likelihood: Categorical, y):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
+
+

@@ -53,6 +53,8 @@
     "bow_loss_tl": false, 
     "MADE_loss": false,
     "MADE_loss_tl": false,
+    "count_MADE_loss": true,
+    "count_MADE_loss_tl": true,
     "ibm1_loss": false,
     "shuffle_lm": false,
     "shuffle_lm_tl": false,
