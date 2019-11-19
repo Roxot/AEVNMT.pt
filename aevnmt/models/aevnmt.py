@@ -186,11 +186,13 @@ class AEVNMT(nn.Module):
         # Obtain auxiliary X_i|z, x_{<i}
         aux_lm_likelihoods = dict()
         for aux_name, aux_decoder in self.aux_lms.items():
+            # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_lm_likelihoods[aux_name] = aux_decoder(x_shuff, z)
             aux_lm_likelihoods[aux_name] = aux_decoder(x, z)
 
         # Obtain auxiliary Y_j|z, x, y_{<j}
         aux_tm_likelihoods = dict()
         for aux_name, aux_decoder in self.aux_tms.items():
+            # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y_shuff, z)
             aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y, z)
 
         # Estimate the Categorical parameters for E[P(y|x, z)] using the given sample of the latent
@@ -210,9 +212,11 @@ class AEVNMT(nn.Module):
         return torch.cat(tm_logits, dim=1), lm_likelihood, torch.cat(all_att_weights, dim=1), aux_lm_likelihoods, aux_tm_likelihoods
 
     def log_likelihood_tm(self, comp_name, likelihood: Distribution, y):
+        # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_lm_likelihoods[aux_name] = aux_decoder(x_shuff, z)
         return self.aux_tms[comp_name].log_prob(likelihood, y)
     
     def log_likelihood_lm(self, comp_name, likelihood: Distribution, x):
+        # TODO: give special treatment to components that take shuffled inputs, e.g. if aux_decoder.shuffled_inputs: aux_tm_likelihoods[aux_name] = aux_decoder(x, seq_mask_x, seq_len_x, y_shuff, z)
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def compute_conditionals(self, x_in, seq_mask_x, seq_len_x, x_out, y_in, y_out, z):
@@ -356,12 +360,14 @@ class AEVNMT(nn.Module):
         side_lm_likelihood = torch.zeros([len(aux_lm_likelihoods), KL.size(0)], dtype=KL.dtype, device=KL.device)
         for c, (aux_name, aux_likelihood) in enumerate(aux_lm_likelihoods.items()):
             out_dict['lm/' + aux_name] = self.log_likelihood_lm(aux_name, aux_likelihood, targets_x)
+            # TODO: give special treatment to components that take shuffled outputs, e.g. if aux_decoder.shuffled_inputs: self.log_likelihood_lm(aux_name, aux_likelihood, targets_x_shuff) 
             side_lm_likelihood[c] = out_dict['lm/' + aux_name]
         # Alternative views of p(y|z,x)
         # [Cy, B]
         side_tm_likelihood = torch.zeros([len(aux_tm_likelihoods), KL.size(0)], dtype=KL.dtype, device=KL.device)
         for c, (aux_name, aux_likelihood) in enumerate(aux_tm_likelihoods.items()):
             out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
+            # TODO: give special treatment to components that take shuffled outputs, e.g. if aux_decoder.shuffled_inputs: self.log_likelihood_lm(aux_name, aux_likelihood, targets_y_shuff) 
             side_tm_likelihood[c] = out_dict['tm/' + aux_name]
        
         if not self.mixture_likelihood:

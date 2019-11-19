@@ -105,16 +105,6 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
 
 def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
-    #rnnlm = RNNLM(vocab_size=vocab_src.size(),
-    #              emb_size=hparams.emb_size,
-    #              hidden_size=hparams.hidden_size,
-    #              pad_idx=vocab_src[PAD_TOKEN],
-    #              dropout=hparams.dropout,
-    #              num_layers=hparams.num_dec_layers,
-    #              cell_type=hparams.cell_type,
-    #              tied_embeddings=hparams.tied_embeddings,
-    #              feed_z_size=hparams.latent_size if hparams.feed_z else 0)
-
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb_size, padding_idx=vocab_src[PAD_TOKEN])
     tgt_embedder = torch.nn.Embedding(vocab_tgt.size(), hparams.emb_size, padding_idx=vocab_tgt[PAD_TOKEN])
     
@@ -137,18 +127,19 @@ def create_model(hparams, vocab_src, vocab_tgt):
     # Auxiliary generative components
     aux_lms = create_aux_language_models(src_embedder, hparams)
     aux_tms = create_aux_translation_models(src_embedder, tgt_embedder, hparams)
-   
-    if False:  # testing something here
-        aux_tms['att'] = AttentionBasedTM(
-            src_embedder=rnnlm.embedder,
-            tgt_embedder=tgt_embedder,
-            encoder=encoder,
-            decoder=decoder,
-            latent_size=hparams.latent_size,
-            dropout=hparams.dropout,
-            feed_z=hparams.feed_z,
-            tied_embeddings=hparams.tied_embeddings
-        )
+  
+    # Note: Wilker is working on this bit
+    #if False:  # testing something here
+    #    aux_tms['att'] = AttentionBasedTM(
+    #        src_embedder=rnnlm.embedder,
+    #        tgt_embedder=tgt_embedder,
+    #        encoder=encoder,
+    #        decoder=decoder,
+    #        latent_size=hparams.latent_size,
+    #        dropout=hparams.dropout,
+    #        feed_z=hparams.feed_z,
+    #        tied_embeddings=hparams.tied_embeddings
+    #    )
         
     # Inference components
     inf_encoder = get_inference_encoder(
