@@ -60,7 +60,7 @@ def create_aux_language_models(src_embedder, hparams) -> Dict[str, GenerativeLM]
             pad_idx=src_embedder.padding_idx, 
             num_masks=10,  # TODO: generalise
             resample_mask_every=10)  # TODO: generalise
-    if hparams.shuffle_lm:
+    if hparams.shuffle_lm:  # TODO: implement shuffling 
         lms['shuffled'] = CorrelatedCategoricalsLM(
             embedder=src_embedder,
             latent_size=hparams.latent_size,
@@ -98,7 +98,7 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
             pad_idx=tgt_embedder.padding_idx,
             num_masks=10,  # TODO: generalise
             resample_mask_every=10)  # TODO: generalise
-    if hparams.shuffle_lm_tl:
+    if hparams.shuffle_lm_tl:  # TODO: implement shuffling
         tms['shuffled'] = CorrelatedCategoricalsTM(
             embedder=tgt_embedder,
             latent_size=hparams.latent_size,
