@@ -2,7 +2,7 @@
 Inference models
 
 * InferenceEncoder: maps from sequence pairs (x,y) to a fixed-dimension vector. Some of the encoders available ignore y (they can be used as prediction models).
-* InferenceNetwork: encapsulates an InferenceEncoder to encode (x) or (x, y) and a Conditioner to parameterise a distribution of choice.
+* InferenceModel: encapsulates an InferenceEncoder to encode (x) or (x, y) and a Conditioner to parameterise a distribution of choice.
 """
 from itertools import chain
 
@@ -173,7 +173,7 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
         raise NotImplementedError("I do not yet support encoder_style=%r" % encoder_style)
     return encoder
 
-class InferenceNetwork(nn.Module):
+class InferenceModel(nn.Module):
 
     def __init__(self, family: str, latent_size: int, hidden_size: int, encoder: InferenceEncoder):
         """

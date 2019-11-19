@@ -82,7 +82,17 @@ options = {
 
     "bow_loss":(bool, False, False, "Add SL bag-of-words term to the loss", 1),
     "bow_loss_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
-
+    "MADE_loss":(bool, False, False, "Add SL MADE term to the loss", 1),
+    "MADE_loss_tl":(bool, False, False, "Add TL MADE term to the loss", 1),
+    "count_MADE_loss":(bool, False, False, "Add SL count MADE term to the loss", 1),
+    "count_MADE_loss_tl":(bool, False, False, "Add TL count MADE term to the loss", 1),
+    "shuffle_lm":(bool, False, False, "z is also used to produce source sentences with a shuffled LM instead of a reverse LM", 1),
+    "shuffle_lm_tl":(bool, False, False, "z is also used to produce target sentences with a shuffled LM instead of a reverse LM", 1),
+    "shuffle_lm_keep_bpe":(bool, False, False, "Shuffle whole words instead of BPE fragments.", 1),
+    "mixture_likelihood":(bool, False, False, "Use a mixture of likelihoods", 1),
+    "mixture_likelihood_dir_prior":(float, 0., False, "Specify a symmetric Dirichlet prior over mixture weights (use 0 for uniform and deterministic weights).", 1),
+    
+    "ibm1_loss":(bool, False, False, "Side loss based on IBM1-style likelihood p(y|x,z)", 1),
 
     "encoder_style": (str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
     "decoder_style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
