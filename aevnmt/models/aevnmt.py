@@ -13,7 +13,7 @@ from aevnmt.dist import get_named_params
 from aevnmt.dist import NormalLayer, KumaraswamyLayer
 
 from .generative import GenerativeLM, GenerativeTM
-from .inference import InferenceEncoder, InferenceNetwork
+from .inference import InferenceEncoder, InferenceModel
 
 from probabll.distributions import MixtureOfGaussians
 
@@ -21,8 +21,8 @@ from probabll.distributions import MixtureOfGaussians
 class AEVNMT(nn.Module):
 
     def __init__(self, latent_size, src_embedder, tgt_embedder, encoder, decoder, 
-            language_model: GenerativeLM, inf_encoder: InferenceEncoder,
-            dropout, tied_embeddings, prior_family: str, prior_params: list, posterior_family: str,
+            language_model: GenerativeLM, inference_model: InferenceModel,
+            dropout, tied_embeddings, prior_family: str, prior_params: list, 
             feed_z=False,  
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):
@@ -31,6 +31,7 @@ class AEVNMT(nn.Module):
         self.tgt_embedder = tgt_embedder
         self.latent_size = latent_size
         self.language_model = language_model
+        self.inference_model = inference_model
         
         # TODO: use new GenerativeTM abstraction
         # v
@@ -47,12 +48,6 @@ class AEVNMT(nn.Module):
                                                 nn.Tanh())
         # ^
 
-        self.inf_network = InferenceNetwork(
-            family=posterior_family,
-            latent_size=latent_size,
-            hidden_size=inf_encoder.hidden_size,
-            encoder=inf_encoder)
-
         self.mixture_likelihood = mixture_likelihood
         self.mixture_likelihood_dir_prior = mixture_likelihood_dir_prior
         # Auxiliary LMs and TMs
@@ -63,7 +58,6 @@ class AEVNMT(nn.Module):
         # parameters, but are rather constant. Registering them as buffers still makes sure that
         # they will be moved to the appropriate device on which the model is run.
         self.prior_family = prior_family
-        self.posterior_family = posterior_family
         if prior_family == "gaussian":
             if not prior_params:
                 prior_params = [0., 1.]
@@ -82,7 +76,7 @@ class AEVNMT(nn.Module):
                 raise ValueError("The shape parameters of a Beta distribution are strictly positive: %r" % prior_params)
             self.register_buffer("prior_a", torch.full([latent_size], prior_params[0]))
             self.register_buffer("prior_b", torch.full([latent_size], prior_params[1]))
-            if posterior_family != "kumaraswamy":
+            if inference_model.family != "kumaraswamy":
                 raise ValueError("I think you forgot to change your posterior distribution to something with support (0,1)")
         elif prior_family == "mog":
             if not prior_params:
@@ -106,7 +100,7 @@ class AEVNMT(nn.Module):
             raise NotImplementedError("I cannot impose a %s prior on the latent code." % prior_family)
 
     def inference_parameters(self):
-        return self.inf_network.parameters()
+        return self.inference_model.parameters()
 
     def embedding_parameters(self):
         return chain(self.src_embedder.parameters(), self.tgt_embedder.parameters())
@@ -137,7 +131,7 @@ class AEVNMT(nn.Module):
         """
         Returns an approximate posterior distribution q(z|x, y).
         """
-        return self.inf_network(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
+        return self.inference_model(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
 
     def prior(self) -> torch.distributions.Distribution:
         if self.prior_family == "gaussian":

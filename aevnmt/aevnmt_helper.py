@@ -13,7 +13,7 @@ from aevnmt.components import RNNEncoder, beam_search, greedy_decode, sampling_d
 from aevnmt.models import AEVNMT, RNNLM
 from aevnmt.models.generative import GenerativeLM, IndependentLM, CorrelatedBernoullisLM, CorrelatedCategoricalsLM
 from aevnmt.models.generative import GenerativeTM, IndependentTM, CorrelatedBernoullisTM, CorrelatedCategoricalsTM, IBM1TM, AttentionBasedTM
-from aevnmt.models.inference import get_inference_encoder
+from aevnmt.models.inference import get_inference_encoder, InferenceModel
 from aevnmt.dist import get_named_params
 from .train_utils import create_attention, create_encoder, create_decoder, attention_summary, compute_bleu
 
@@ -103,6 +103,32 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
     return tms
 
 
+def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceModel:
+    """Create an inference model and configure its encoder"""
+    # Inference components
+    inf_encoder = get_inference_encoder(
+        encoder_style=hparams.inf_encoder_style,
+        conditioning_context=hparams.inf_conditioning,
+        embedder_x=src_embedder,
+        embedder_y=tgt_embedder,
+        hidden_size=hparams.hidden_size,
+        rnn_bidirectional=hparams.bidirectional,
+        rnn_num_layers=hparams.num_enc_layers,
+        rnn_cell_type=hparams.cell_type,
+        transformer_heads=hparams.transformer_heads, 
+        transformer_layers=hparams.num_enc_layers, 
+        nli_shared_size=hparams.emb_size,
+        nli_max_distance=20,  # TODO: generalise 
+        dropout=hparams.dropout, 
+        composition="maxpool" if hparams.max_pooling_states else "avg")
+    inf_model = InferenceModel(
+        family=hparams.posterior,
+        latent_size=hparams.latent_size,
+        hidden_size=inf_encoder.hidden_size,
+        encoder=inf_encoder)
+    return inf_model
+
+
 def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb_size, padding_idx=vocab_src[PAD_TOKEN])
@@ -141,22 +167,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
     #        tied_embeddings=hparams.tied_embeddings
     #    )
         
-    # Inference components
-    inf_encoder = get_inference_encoder(
-        encoder_style=hparams.inf_encoder_style,
-        conditioning_context=hparams.inf_conditioning,
-        embedder_x=src_embedder,
-        embedder_y=tgt_embedder,
-        hidden_size=hparams.hidden_size,
-        rnn_bidirectional=hparams.bidirectional,
-        rnn_num_layers=hparams.num_enc_layers,
-        rnn_cell_type=hparams.cell_type,
-        transformer_heads=hparams.transformer_heads, 
-        transformer_layers=hparams.num_enc_layers, 
-        nli_shared_size=hparams.emb_size,
-        nli_max_distance=20,  # TODO: generalise 
-        dropout=hparams.dropout, 
-        composition="maxpool" if hparams.max_pooling_states else "avg")
+    inf_model = create_inference_model(src_embedder, tgt_embedder, hparams)
 
     model = AEVNMT(
         latent_size=hparams.latent_size,
@@ -165,13 +176,12 @@ def create_model(hparams, vocab_src, vocab_tgt):
         encoder=encoder,
         decoder=decoder,
         language_model=language_model,
-        inf_encoder=inf_encoder,
+        inference_model=inf_model,
         dropout=hparams.dropout,
         feed_z=hparams.feed_z,
         tied_embeddings=hparams.tied_embeddings,
         prior_family=hparams.prior,
         prior_params=hparams.prior_params,
-        posterior_family=hparams.posterior,
         aux_lms=aux_lms,
         aux_tms=aux_tms,
         mixture_likelihood=hparams.mixture_likelihood,
