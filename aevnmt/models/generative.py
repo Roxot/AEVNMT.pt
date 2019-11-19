@@ -255,9 +255,10 @@ class IndependentTM(GenerativeTM):
 class CorrelatedBernoullisTM(GenerativeTM):
     """
 
-    P(x|z) = \prod_{v=1}^V Bern([v in x]|b_v(z, x))
+    P(y|z,x) = \prod_{v=1}^V Bern([v in y]|b_v(z, y))
 
-    where V is the vocabulary size and b(z,x) \in (0, 1)^V is autoregressive in x (we use a MADE).
+    where V is the vocabulary size and b(z,x) \in (0, 1)^V is autoregressive in y (we use a MADE).
+    Note that for now the parameterisation ignores x.
     """
 
     def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):

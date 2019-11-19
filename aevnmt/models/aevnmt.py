@@ -377,8 +377,8 @@ class AEVNMT(nn.Module):
             # where the second row are heuristic side losses (we can think of it as multitask learning)
             elbo = tm_log_likelihood + lm_log_likelihood - KL
             # we sum the alternative views (as in multitask learning)
-            aux_likelihood = side_lm_likelihood.sum(0) + side_tm_likelihood.sum(0)
-            loss = - (elbo + aux_likelihood)
+            aux_log_likelihood = side_lm_likelihood.sum(0) + side_tm_likelihood.sum(0)
+            loss = - (elbo + aux_log_likelihood)
             # main log-likelihoods
             out_dict['lm/main'] = lm_log_likelihood
             out_dict['tm/main'] = tm_log_likelihood
