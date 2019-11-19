@@ -47,9 +47,15 @@
     "posterior": "gaussian", 
     "inf_encoder_style": "rnn",  
     "inf_conditioning": "x",
-    "bow_loss": true,
-    "bow_loss_tl": true, 
-    "MADE_loss": true,
-    "MADE_loss_tl": true,
-    "ibm1_loss": true 
+    "feed_z": true,
+    "max_pooling_states": true,
+    "bow_loss": false,
+    "bow_loss_tl": false, 
+    "MADE_loss": false,
+    "MADE_loss_tl": false,
+    "ibm1_loss": false,
+    "shuffle_lm": false,
+    "shuffle_lm_tl": false,
+    "mixture_likelihood": false,
+    "mixture_likelihood_dir_prior": 0.0
 }
