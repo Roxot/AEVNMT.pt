@@ -127,7 +127,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             if step % hparams.print_every == 0:
                 elapsed = time.time() - tokens_start
                 tokens_per_sec = num_tokens / elapsed if step != 0 else 0
-                grad_norm = gradient_norm(model)
+                grad_norm = gradient_norm(model, skip_null=True)
 
                 displaying = f"raw KL = {return_dict['raw_KL'].mean().item():,.2f}"
                 # - log P(x|z) for the various source LM decoders

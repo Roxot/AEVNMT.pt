@@ -16,7 +16,8 @@ from aevnmt.models.generative import GenerativeLM, IndependentLM, CorrelatedBern
 from aevnmt.models.generative import CorrelatedCategoricalsLM, CorrelatedPoissonsLM
 from aevnmt.models.generative import GenerativeTM, IndependentTM, CorrelatedBernoullisTM, CorrelatedCategoricalsTM
 from aevnmt.models.generative import CorrelatedPoissonsTM, IBM1TM, AttentionBasedTM
-from aevnmt.models.inference import get_inference_encoder, InferenceModel
+from aevnmt.models.inference import InferenceModel, BasicInferenceModel, SwitchingInferenceModel
+from aevnmt.models.inference import get_inference_encoder, combine_inference_encoders
 from aevnmt.dist import get_named_params
 
 from .train_utils import create_attention, create_encoder, create_decoder, attention_summary, compute_bleu
@@ -123,27 +124,97 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
 
 def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceModel:
     """Create an inference model and configure its encoder"""
-    # Inference components
-    inf_encoder = get_inference_encoder(
-        encoder_style=hparams.inf_encoder_style,
-        conditioning_context=hparams.inf_conditioning,
-        embedder_x=DetachedEmbeddingLayer(src_embedder),
-        embedder_y=DetachedEmbeddingLayer(tgt_embedder),
-        hidden_size=hparams.hidden_size,
-        rnn_bidirectional=hparams.bidirectional,
-        rnn_num_layers=hparams.num_enc_layers,
-        rnn_cell_type=hparams.cell_type,
-        transformer_heads=hparams.transformer_heads, 
-        transformer_layers=hparams.num_enc_layers, 
-        nli_shared_size=hparams.emb_size,
-        nli_max_distance=20,  # TODO: generalise 
-        dropout=hparams.dropout, 
-        composition="maxpool" if hparams.max_pooling_states else "avg")
-    inf_model = InferenceModel(
-        family=hparams.posterior,
-        latent_size=hparams.latent_size,
-        hidden_size=inf_encoder.hidden_size,
-        encoder=inf_encoder)
+    if not hparams.inf3:
+        # Inference components
+        inf_encoder = get_inference_encoder(
+            encoder_style=hparams.inf_encoder_style,
+            conditioning_context=hparams.inf_conditioning,
+            embedder_x=DetachedEmbeddingLayer(src_embedder),
+            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            hidden_size=hparams.hidden_size,
+            rnn_bidirectional=hparams.bidirectional,
+            rnn_num_layers=hparams.num_enc_layers,
+            rnn_cell_type=hparams.cell_type,
+            transformer_heads=hparams.transformer_heads, 
+            transformer_layers=hparams.num_enc_layers, 
+            nli_shared_size=hparams.emb_size,
+            nli_max_distance=20,  # TODO: generalise 
+            dropout=hparams.dropout, 
+            composition="maxpool" if hparams.max_pooling_states else "avg")
+        inf_model = BasicInferenceModel(
+            family=hparams.posterior,
+            latent_size=hparams.latent_size,
+            hidden_size=hparams.hidden_size,
+            encoder=inf_encoder)
+    else:  # create 3 inference models and wrap them around a single container
+        enc_styles = hparams.inf3.split(',')
+        if len(enc_styles) != 3:
+            raise ValueError("Specify exactly 3 comma-separated encoder styles, got '%s'" % hparams.inf3)
+        encoder_x = get_inference_encoder(
+            encoder_style=enc_styles[0],
+            conditioning_context='x',
+            embedder_x=DetachedEmbeddingLayer(src_embedder),
+            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            hidden_size=hparams.hidden_size,
+            rnn_bidirectional=hparams.bidirectional,
+            rnn_num_layers=hparams.num_enc_layers,
+            rnn_cell_type=hparams.cell_type,
+            transformer_heads=hparams.transformer_heads, 
+            transformer_layers=hparams.num_enc_layers, 
+            nli_shared_size=hparams.emb_size,
+            nli_max_distance=20,  # TODO: generalise 
+            dropout=hparams.dropout, 
+            composition="maxpool" if hparams.max_pooling_states else "avg")
+        encoder_y = get_inference_encoder(
+            encoder_style=enc_styles[1],
+            conditioning_context='y',
+            embedder_x=DetachedEmbeddingLayer(src_embedder),
+            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            hidden_size=hparams.hidden_size,
+            rnn_bidirectional=hparams.bidirectional,
+            rnn_num_layers=hparams.num_enc_layers,
+            rnn_cell_type=hparams.cell_type,
+            transformer_heads=hparams.transformer_heads, 
+            transformer_layers=hparams.num_enc_layers, 
+            nli_shared_size=hparams.emb_size,
+            nli_max_distance=20,  # TODO: generalise 
+            dropout=hparams.dropout, 
+            composition="maxpool" if hparams.max_pooling_states else "avg")
+        if enc_styles[2] == 'comb':
+            encoder_xy = combine_inference_encoders(encoder_x, encoder_y, hparams.inf3_comb_composition)
+        else:
+            encoder_xy = get_inference_encoder(
+                encoder_style=enc_styles[2],
+                conditioning_context='xy',
+                embedder_x=DetachedEmbeddingLayer(src_embedder),
+                embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+                hidden_size=hparams.hidden_size,
+                rnn_bidirectional=hparams.bidirectional,
+                rnn_num_layers=hparams.num_enc_layers,
+                rnn_cell_type=hparams.cell_type,
+                transformer_heads=hparams.transformer_heads, 
+                transformer_layers=hparams.num_enc_layers, 
+                nli_shared_size=hparams.emb_size,
+                nli_max_distance=20,  # TODO: generalise 
+                dropout=hparams.dropout, 
+                composition="maxpool" if hparams.max_pooling_states else "avg")
+        inf_model = SwitchingInferenceModel(
+            BasicInferenceModel(
+                family=hparams.posterior,
+                latent_size=hparams.latent_size,
+                hidden_size=hparams.hidden_size,
+                encoder=encoder_x),
+            BasicInferenceModel(
+                family=hparams.posterior,
+                latent_size=hparams.latent_size,
+                hidden_size=hparams.hidden_size,
+                encoder=encoder_y),
+            BasicInferenceModel(
+                family=hparams.posterior,
+                latent_size=hparams.latent_size,
+                hidden_size=hparams.hidden_size,
+                encoder=encoder_xy),
+            )
     return inf_model
 
 

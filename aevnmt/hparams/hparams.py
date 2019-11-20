@@ -110,7 +110,8 @@ options = {
     "posterior": (str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 2),
     "inf_encoder_style": (str, "rnn", False, "The type of architecture: rnn|nli", 2),
     "inf_conditioning": (str, "x", False, "Conditioning context for q(z): x|xy", 2),
-
+    "inf3": (str, "", False, "Specify encoders for three different inference models, namely, q(z|x), q(z|y) and q(z|x,y), e.g. rnn,rnn,nli or rnn,rnn,comb. The special type 'comb' uses the other two encoders to make an encoding of the pair.", 2),  
+    "inf3_comb_composition": (str, "cat", False, "Composition function used to combined encodings for q(z|x,y) if --inf3 is set", 2),
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 3),
