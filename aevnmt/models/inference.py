@@ -311,18 +311,18 @@ class SwitchingInferenceModel(InferenceModel):
     """
 
     def __init__(self, model_x: InferenceModel, model_y: InferenceModel, model_xy: InferenceModel):
-        assert model_xy.latent_size == model_x.latent_size == model_y.latent_size, 'Different latent sizes'
-        super().__init__(model_xy.latent_size)
-        self.model_xy = model_xy
+        assert model_x.latent_size == model_y.latent_size == model_xy.latent_size, 'Different latent sizes'
+        super().__init__(model_x.latent_size)
         self.model_x = model_x
         self.model_y = model_y
+        self.model_xy = model_xy
 
-    def forward(self, x=None, seq_mask_x=None, seq_len_x=None, y=None, seq_mask_y=None, seq_len_y=None) -> Distribution:
+    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y) -> Distribution:
         if x is not None and y is not None:
             return self.model_xy(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
         elif x is not None and y is None:
             return self.model_x(x, seq_mask_x, seq_len_x, None, None, None)
-        elif y is None and x is not None:
+        elif y is not None and x is None:
             return self.model_y(None, None, None, y, seq_mask_y, seq_len_y)
         else:
             raise ValueError('I cannot perform inferences from nothing')

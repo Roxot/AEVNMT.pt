@@ -139,7 +139,6 @@ class AEVNMT(nn.Module):
             aux_lm_likelihoods: dictionary mapping auxiliary LMs to their parameterised distributions
             aux_tm_likelihoods: dictionary mapping auxiliary TMs to their parameterised distributions
         """
-
         state = dict()
         lm_likelihood = self.language_model(x, z, state)
         tm_likelihood = self.translation_model(x, seq_mask_x, seq_len_x, y, z, state)

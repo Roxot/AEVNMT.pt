@@ -38,7 +38,7 @@ def _draw_translations(model, val_dl, vocab_src, vocab_tgt, device, hparams):
     return inputs, references, model_hypotheses
 
 
-def create_aux_language_models(src_embedder, hparams) -> Dict[str, GenerativeLM]:
+def create_aux_language_models(vocab_src, src_embedder, hparams) -> Dict[str, GenerativeLM]:
     lms = dict()
     if hparams.bow_loss:
         lms['bow'] = IndependentLM(
@@ -64,6 +64,8 @@ def create_aux_language_models(src_embedder, hparams) -> Dict[str, GenerativeLM]
     if hparams.shuffle_lm:  # TODO: implement shuffling 
         lms['shuffled'] = CorrelatedCategoricalsLM(
             embedder=src_embedder,
+            sos_idx=vocab_src[SOS_TOKEN],
+            eos_idx=vocab_src[EOS_TOKEN],
             latent_size=hparams.latent_size,
             hidden_size=hparams.hidden_size,
             dropout=hparams.dropout,
@@ -225,6 +227,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
     
     language_model = CorrelatedCategoricalsLM(
         embedder=src_embedder,
+        sos_idx=vocab_src[SOS_TOKEN],
+        eos_idx=vocab_src[EOS_TOKEN],
         latent_size=hparams.latent_size,
         hidden_size=hparams.hidden_size,
         dropout=hparams.dropout,
@@ -236,7 +240,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
     )
     
     # Auxiliary generative components
-    aux_lms = create_aux_language_models(src_embedder, hparams)
+    aux_lms = create_aux_language_models(vocab_src, src_embedder, hparams)
     aux_tms = create_aux_translation_models(src_embedder, tgt_embedder, hparams)
     
     encoder = create_encoder(hparams)
@@ -279,7 +283,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     # Use q(z|x) for training to sample a z.
     qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
     z = qz.rsample()
-
+    
     # Compute the translation and language model logits.
     tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
