@@ -14,7 +14,7 @@ def tile_rnn_hidden_for_decoder(hidden, decoder):
 class BahdanauDecoder(nn.Module):
 
     def __init__(self, emb_size, hidden_size, attention,
-                 dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True,feed_z_size=0):
+                 dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True, feed_z_size=0):
         """
         RNN decoder with Bahdanau style updates.
         """
@@ -22,6 +22,7 @@ class BahdanauDecoder(nn.Module):
         self.init_from_encoder_final = init_from_encoder_final
         self.cell_type = cell_type
         self.hidden_size = hidden_size
+        self.feed_z_size = feed_z_size
         rnn_dropout = 0. if num_layers == 1 else dropout
         rnn_fn = rnn_creation_fn(cell_type)
         self.rnn = rnn_fn(emb_size + feed_z_size + attention.key_size, hidden_size, batch_first=True,
@@ -45,7 +46,7 @@ class BahdanauDecoder(nn.Module):
             hidden = tile_rnn_hidden(hidden, self.rnn) # [num_layers, B, H_enc_total]
             return hidden
 
-    def step(self, prev_embed, hidden, x_mask, encoder_outputs,z=None):
+    def step(self, prev_embed, hidden, x_mask, encoder_outputs, z=None):
         """
         :param prev_embed: [B, emb_size]
         :param hidden: [num_layers, 1, hidden_size]
@@ -59,7 +60,7 @@ class BahdanauDecoder(nn.Module):
         else:
             query = hidden
 
-        if z is not None:
+        if self.feed_z_size > 0:
             #z: (B, latent_size)
             #Concatenate z to RNN input at each timestep
             prev_embed=torch.cat([ prev_embed, z ],dim=-1)
@@ -80,7 +81,7 @@ class BahdanauDecoder(nn.Module):
 
         return pre_output, hidden, att_weights
 
-    def forward(self, y_embed, x_mask, encoder_outputs, encoder_final, hidden=None,z=None):
+    def forward(self, y_embed, x_mask, encoder_outputs, encoder_final, hidden=None, z=None):
         """
         Does teacher forcing. Unrolls entire RNN.
         """
@@ -94,12 +95,7 @@ class BahdanauDecoder(nn.Module):
         max_time = y_embed.size(1)
         for t in range(max_time):
             prev_embed = y_embed[:, t]
-            if z is not None:
-                #z: (B, latent_size)
-                #Concatenate z to RNN input at each timestep
-                prev_embed=torch.cat([ prev_embed, z ],dim=-1)
-            pre_output, hidden, att_weights = self.step(prev_embed, hidden, x_mask,
-                                                        encoder_outputs)
+            pre_output, hidden, att_weights = self.step(prev_embed, hidden, x_mask, encoder_outputs, z=z)
             outputs.append(pre_output)
             all_att_weights.append(att_weights)
         return torch.cat(outputs, dim=1), torch.cat(all_att_weights, dim=1)
@@ -108,7 +104,7 @@ class BahdanauDecoder(nn.Module):
 class LuongDecoder(nn.Module):
 
     def __init__(self, emb_size, hidden_size, attention,
-                 dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True,feed_z_size=0):
+                 dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True, feed_z_size=0):
         """
         RNN decoder with Luong style updates.
         """
@@ -116,6 +112,7 @@ class LuongDecoder(nn.Module):
         self.init_from_encoder_final = init_from_encoder_final
         self.cell_type = cell_type
         self.hidden_size = hidden_size
+        self.feed_z_size = feed_z_size
         rnn_dropout = 0. if num_layers == 1 else dropout
         rnn_fn = rnn_creation_fn(cell_type)
         self.rnn = rnn_fn(emb_size + feed_z_size + hidden_size, hidden_size, batch_first=True,
@@ -145,7 +142,7 @@ class LuongDecoder(nn.Module):
             hidden = tile_rnn_hidden(hidden, self.rnn) # [num_layers, B, H_enc_total]
             return (hidden, None)
 
-    def step(self, prev_embed, input_vectors, x_mask, encoder_outputs,z=None):
+    def step(self, prev_embed, input_vectors, x_mask, encoder_outputs, z=None):
         """
         :param prev_embed: [B, emb_size]
         :param hidden: [num_layers, 1, hidden_size]
@@ -164,7 +161,7 @@ class LuongDecoder(nn.Module):
         if prev_pre_output is None:
             prev_pre_output = torch.zeros_like(prev_embed).unsqueeze(1)
 
-        if z is not None:
+        if self.feed_z_size > 0:
             #z: (B, latent_size)
             #Concatenate z to RNN input at each timestep
             prev_embed=torch.cat([ prev_embed, z ],dim=-1)
@@ -191,7 +188,7 @@ class LuongDecoder(nn.Module):
 
         return pre_output, (hidden, pre_output), att_weights
 
-    def forward(self, y_embed, x_mask, encoder_outputs, encoder_final, hidden=None,z=None):
+    def forward(self, y_embed, x_mask, encoder_outputs, encoder_final, hidden=None, z=None):
         """
         Does teacher forcing. Unrolls entire RNN.
         """
@@ -206,12 +203,8 @@ class LuongDecoder(nn.Module):
         max_time = y_embed.size(1)
         for t in range(max_time):
             prev_embed = y_embed[:, t]
-            if z is not None:
-                #z: (B, latent_size)
-                #Concatenate z to RNN input at each timestep
-                prev_embed=torch.cat([ prev_embed, z ],dim=-1)
-            pre_output, hidden, att_weights = self.step(prev_embed, hidden, x_mask,
-                                                        encoder_outputs)
+            pre_output, hidden, att_weights = self.step(prev_embed, hidden, x_mask, encoder_outputs, z=z)
             outputs.append(pre_output)
             all_att_weights.append(att_weights)
         return torch.cat(outputs, dim=1), torch.cat(all_att_weights, dim=1)
+

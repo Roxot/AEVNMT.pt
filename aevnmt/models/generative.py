@@ -331,13 +331,13 @@ class CorrelatedCategoricalsLM(GenerativeLM):
             prev_y = self.embedder(prev_y)
             hidden, pre_output = self.step(prev_y, hidden, z)
             logits = self.generate(pre_output)
-            py_x = Categorical(logits=logits)
+            px_z = Categorical(logits=logits)
             if greedy:
                 prediction = torch.argmax(logits, dim=-1)
             else:
-                prediction = py_x.sample()
+                prediction = px_z.sample()
             prev_y = prediction.view(batch_size)
-            log_prob_pred = py_x.log_prob(prediction)
+            log_prob_pred = px_z.log_prob(prediction)
             log_probs.append(torch.where(is_complete, torch.zeros_like(log_prob_pred), log_prob_pred))
             predictions.append(torch.where(is_complete, torch.full_like(prediction, self.embedder.padding_idx), prediction))
             is_complete = is_complete | (prediction == self.eos_idx).byte()
@@ -380,6 +380,9 @@ class GenerativeTM(nn.Module):
         y: [B, Ty] observed token ids
         """
         raise NotImplementedError("Implement me!")
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        raise NotImplementedError("Implement me!")
 
 
 class IndependentTM(GenerativeTM):
@@ -401,6 +404,9 @@ class IndependentTM(GenerativeTM):
     
     def log_prob(self, likelihood: Categorical, y):
         return self.tgt_independent_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
+        return self.tgt_independent_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 
 class CorrelatedBernoullisTM(GenerativeTM):
@@ -428,6 +434,9 @@ class CorrelatedBernoullisTM(GenerativeTM):
 
     def log_prob(self, likelihood: Bernoulli, y):
         return self.correlated_bernoullis_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_bernoullis_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 
 class CorrelatedPoissonsTM(GenerativeTM):
@@ -457,6 +466,9 @@ class CorrelatedPoissonsTM(GenerativeTM):
 
     def log_prob(self, likelihood: Poisson, y):
         return self.correlated_poissons_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_poissons_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 class CorrelatedCategoricalsTM(GenerativeTM):
     """
@@ -465,11 +477,13 @@ class CorrelatedCategoricalsTM(GenerativeTM):
     where n = |y|. Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, embedder, latent_size, hidden_size, 
+    def __init__(self, embedder, sos_idx, eos_idx, latent_size, hidden_size, 
             dropout, num_layers, cell_type, tied_embeddings, feed_z, gate_z):
         super().__init__()
         self.correlated_categoricals_lm = CorrelatedCategoricalsLM(
             embedder=embedder,
+            sos_idx=sos_idx,
+            eos_idx=eos_idx,
             latent_size=latent_size,
             hidden_size=hidden_size,
             dropout=dropout,
@@ -485,6 +499,9 @@ class CorrelatedCategoricalsTM(GenerativeTM):
 
     def log_prob(self, likelihood: Categorical, y):
         return self.correlated_categoricals_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_poissons_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 class IBM1TM(GenerativeTM):
     """
@@ -532,10 +549,13 @@ class IBM1TM(GenerativeTM):
 
 class AttentionBasedTM(GenerativeTM):
 
-    def __init__(self, src_embedder, tgt_embedder, encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
+    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx, 
+            encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
+        self.tgt_sos_idx = tgt_sos_idx
+        self.tgt_eos_idx = tgt_eos_idx
         self.encoder = encoder
         self.decoder = decoder
         self.encoder_init_layer = nn.Sequential(
@@ -598,4 +618,32 @@ class AttentionBasedTM(GenerativeTM):
     def log_prob(self, likelihood: Categorical, y):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
 
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
+        encoder_outputs, encoder_final = self.encode(x, seq_len_x, z)
+        hidden = self.init_decoder(encoder_outputs, encoder_final, z)
+        batch_size = seq_mask_x.size(0)
+        prev_y = torch.full(size=[batch_size], fill_value=self.tgt_sos_idx, dtype=torch.long, device=seq_mask_x.device)
+
+        # Decode step-by-step by picking the maximum probability word
+        # at each time step.
+        predictions = []
+        log_probs = []
+        is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
+        for t in range(max_len):
+            prev_y = self.tgt_embedder(prev_y)
+            pre_output, hidden, _ = self.decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs, z)
+            logits = self.generate(pre_output)
+            py_xz = Categorical(logits=logits)
+            if greedy:
+                prediction = torch.argmax(logits, dim=-1)
+            else:
+                prediction = py_xz.sample()
+            prev_y = prediction.view(batch_size)
+            log_prob_pred = py_xz.log_prob(prediction)
+            log_probs.append(torch.where(is_complete, torch.zeros_like(log_prob_pred), log_prob_pred))
+            predictions.append(torch.where(is_complete, torch.full_like(prediction, self.tgt_embedder.padding_idx), prediction))
+            is_complete = is_complete | (prediction == self.tgt_eos_idx).byte()
+
+        state['log_prob'] = torch.cat(log_probs, dim=1) 
+        return torch.cat(predictions, dim=1)
 

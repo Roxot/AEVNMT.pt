@@ -249,6 +249,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
     translation_model = AttentionBasedTM(
         src_embedder=src_embedder,
         tgt_embedder=tgt_embedder,
+        tgt_sos_idx=vocab_tgt[SOS_TOKEN],
+        tgt_eos_idx=vocab_tgt[EOS_TOKEN],
         encoder=encoder,
         decoder=decoder,
         latent_size=hparams.latent_size,
@@ -283,7 +285,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     # Use q(z|x) for training to sample a z.
     qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
     z = qz.rsample()
-    
+ 
     # Compute the translation and language model logits.
     tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
@@ -358,7 +360,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
         print(f"- Reference: {r[0]}")
         for h in hs:
             print(f"- Translation: {h}")
-
+    
     # Write validation summaries.
     if summary_writer is not None:
         summary_writer.add_scalar(f"{title}/validation/BLEU", val_bleu, step)
@@ -398,6 +400,9 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
 
         if hparams.sample_decoding:
+            # TODO: we could use the new version below
+            #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
+            #    max_len=hparams.max_decoding_length, greedy=False)
             raw_hypothesis = sampling_decode(
                 model.translation_model.decoder, 
                 model.translation_model.tgt_embed,
@@ -407,6 +412,9 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,
                 z if hparams.feed_z else None)
         elif hparams.beam_width <= 1:
+            # TODO: we could use the new version below
+            #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
+            #    max_len=hparams.max_decoding_length, greedy=True)
             raw_hypothesis = greedy_decode(
                 model.translation_model.decoder, 
                 model.translation_model.tgt_embed,
