@@ -20,7 +20,7 @@ class AEVNMT(nn.Module):
     def __init__(self, latent_size, src_embedder, tgt_embedder, 
             language_model: GenerativeLM, translation_model: GenerativeTM, inference_model: InferenceModel,
             dropout, tied_embeddings, prior_family: str, prior_params: list, 
-            feed_z=False,  
+            feed_z=False,  mdr=-1.,
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):
         super().__init__()
@@ -36,6 +36,10 @@ class AEVNMT(nn.Module):
         # Auxiliary LMs and TMs
         self.aux_lms = nn.ModuleDict(aux_lms)
         self.aux_tms = nn.ModuleDict(aux_tms)
+
+        self.mdr = mdr
+        if mdr > 0.:
+            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([1.01]))
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -102,6 +106,12 @@ class AEVNMT(nn.Module):
 
     def tm_parameters(self):
         return chain(self.tgt_embedder.parameters(), self.translation_model.parameters())
+   
+    def lagrangian_parameters(self):
+        if self.mdr > 0.:
+            return [self.mdr_lag_weight]
+        else:
+            return None
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
@@ -167,7 +177,8 @@ class AEVNMT(nn.Module):
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
-            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
+            free_nats=0., KL_weight=1., reduction="mean",
+            aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -221,7 +232,7 @@ class AEVNMT(nn.Module):
             out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
             # TODO: give special treatment to components that take shuffled outputs, e.g. if aux_decoder.shuffled_inputs: self.log_likelihood_lm(aux_name, aux_likelihood, targets_y_shuff) 
             side_tm_likelihood[c] = out_dict['tm/' + aux_name]
-       
+
         if not self.mixture_likelihood:
             # ELBO
             #  E_q[ \log P(x|z,c=main) P(y|z,x,c=main)] - KL(q(z) || p(z)) 
@@ -263,6 +274,11 @@ class AEVNMT(nn.Module):
             out_dict['tm/main'] = tm_mixture
             out_dict['lm/recurrent'] = lm_log_likelihood
             out_dict['tm/recurrent'] = tm_log_likelihood
+
+        # Add MDR constraint.
+        if self.mdr > 0.:
+            constraint = self.mdr_lag_weight.abs() * (self.mdr - KL) 
+            loss = loss + constraint
 
         # Return differently according to the reduction setting.
         if reduction == "mean":

@@ -196,6 +196,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
         tied_embeddings=hparams.tied_embeddings,
         prior_family=hparams.prior,
         prior_params=hparams.prior_params,
+        mdr=hparams.minimum_desired_rate,
         aux_lms=aux_lms,
         aux_tms=aux_tms,
         mixture_likelihood=hparams.mixture_likelihood,

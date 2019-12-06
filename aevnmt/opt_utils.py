@@ -73,7 +73,7 @@ def get_lr_scheduler(optimizer, hparams):
     return scheduler
 
 
-def construct_optimizers(hparams, gen_parameters, inf_z_parameters):
+def construct_optimizers(hparams, gen_parameters, inf_z_parameters, lagrangian_parameters=None):
     optimizers = {
         "gen": get_optimizer(
             hparams.gen_optimizer,
@@ -102,6 +102,14 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters):
         lr_schedulers["inf_z"] = get_lr_scheduler(
             optimizers["inf_z"],
             hparams
+        )
+
+    if lagrangian_parameters is not None:
+        optimizers["lagrangian"] = get_optimizer(
+            "rmsprop",
+            lagrangian_parameters,
+            hparams.gen_lr,
+            0.
         )
 
     return optimizers, lr_schedulers

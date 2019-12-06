@@ -24,6 +24,9 @@ class ConditionalNMT(nn.Module):
     def inference_parameters(self):
         return None
 
+    def lagrangian_parameters(self):
+        return None
+
     def src_embed(self, x):
         x_embed = self.src_embedder(x)
         x_embed = self.dropout_layer(x_embed)
