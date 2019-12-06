@@ -271,7 +271,7 @@ class CorrelatedCategoricalsLM(GenerativeLM):
 
     def log_prob(self, likelihood: Categorical, x):
         # [B, Tx] -> [B]
-        return (likelihood.log_prob(x) * (x != self.pad_idx)).sum(-1)
+        return (likelihood.log_prob(x) * (x != self.pad_idx).float()).sum(-1)
 
 class GenerativeTM(nn.Module):
     """
@@ -524,5 +524,3 @@ class AttentionBasedTM(GenerativeTM):
 
     def log_prob(self, likelihood: Categorical, y):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
-
-
