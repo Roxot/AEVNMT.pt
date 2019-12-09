@@ -106,9 +106,9 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters, lagrangian_p
 
     if lagrangian_parameters is not None:
         optimizers["lagrangian"] = get_optimizer(
-            "rmsprop",
+            "adam",
             lagrangian_parameters,
-            hparams.gen_lr,
+            hparams.gen_lr, 
             0.
         )
 

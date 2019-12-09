@@ -39,7 +39,7 @@ class AEVNMT(nn.Module):
 
         self.mdr = mdr
         if mdr > 0.:
-            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([1.01]))
+            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([0.99]))
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -277,7 +277,7 @@ class AEVNMT(nn.Module):
 
         # Add MDR constraint.
         if self.mdr > 0.:
-            constraint = self.mdr_lag_weight.abs() * (self.mdr - KL) 
+            constraint = self.mdr_lag_weight * (self.mdr - KL.mean()) 
             loss = loss + constraint
 
         # Return differently according to the reduction setting.
