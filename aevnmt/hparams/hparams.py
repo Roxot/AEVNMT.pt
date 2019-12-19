@@ -170,6 +170,8 @@ options = {
     "word_dropout": (float, 0., False, "Fraction of input words to drop.", 4),
     "KL_free_nats": (float, 0., False, "KL = min(KL_free_nats, KL)", 4),
     "KL_annealing_steps": (int, 0, False, "Amount of KL annealing steps (0...1)", 4),
+    "minimum_desired_rate": (float, -1., False, "If positive adds a soft Lagrangian constraint for the KL term to"
+                                                " minimally achieve the given value.", 4),
     "evaluate_every": (int, -1, False, "The number of batches after which to run"
                                        " evaluation. If <= 0, evaluation will happen"
                                        " after every epoch.", 4),

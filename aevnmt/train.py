@@ -117,6 +117,13 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                                          hparams.max_gradient_norm)
             optimizers["gen"].step()
             if "inf_z" in optimizers: optimizers["inf_z"].step()
+            if "lagrangian" in optimizers:
+                # We are doing maximization for this parameter group rather than minimization. Thus we
+                # invert the direction of the gradients.
+                for group in optimizers["lagrangian"].param_groups:
+                    for p in group["params"]:
+                        p.grad = -1 * p.grad
+                optimizers["lagrangian"].step()
 
             # Update statistics.
             num_tokens += (seq_len_x.sum() + seq_len_y.sum()).item()
@@ -153,6 +160,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             # Zero the gradient buffer.
             optimizers["gen"].zero_grad()
             if "inf_z" in optimizers: optimizers["inf_z"].zero_grad()
+            if "lagrangian" in optimizers: optimizers["lagrangian"].zero_grad()
 
             # Update the learning rate scheduler if needed.
             lr_scheduler_step(lr_schedulers, hparams)
@@ -210,7 +218,8 @@ def main():
     optimizers, lr_schedulers = construct_optimizers(
         hparams,
         gen_parameters=model.generative_parameters(),
-        inf_z_parameters=model.inference_parameters())
+        inf_z_parameters=model.inference_parameters(),
+        lagrangian_parameters=model.lagrangian_parameters())
     device = torch.device("cuda:0") if hparams.use_gpu else torch.device("cpu")
     model = model.to(device)
 

@@ -290,6 +290,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
         feed_z=hparams.feed_z,
         tied_embeddings=hparams.tied_embeddings,
         prior=priors[0] if len(priors) == 1 else ProductOfPriorsLayer(priors),
+        mdr=hparams.minimum_desired_rate,
         aux_lms=aux_lms,
         aux_tms=aux_tms,
         mixture_likelihood=hparams.mixture_likelihood,

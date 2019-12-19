@@ -325,7 +325,7 @@ class CorrelatedCategoricalsLM(GenerativeLM):
 
     def log_prob(self, likelihood: Categorical, x):
         # [B, Tx] -> [B]
-        return (likelihood.log_prob(x) * (x != self.pad_idx)).sum(-1)
+        return (likelihood.log_prob(x) * (x != self.pad_idx).float()).sum(-1)
     
     def sample(self, z, max_len=100, greedy=False, state=dict()):
         """
@@ -358,7 +358,6 @@ class CorrelatedCategoricalsLM(GenerativeLM):
 
         state['log_prob'] = torch.cat(log_probs, dim=1)
         return torch.cat(predictions, dim=1)
-
 
 class GenerativeTM(nn.Module):
     """

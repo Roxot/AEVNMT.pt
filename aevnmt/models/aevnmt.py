@@ -20,6 +20,7 @@ class AEVNMT(nn.Module):
             prior: PriorLayer, 
             dropout, tied_embeddings,
             feed_z=False,  
+            mdr=-1.,
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):
         super().__init__()
@@ -35,6 +36,10 @@ class AEVNMT(nn.Module):
         # Auxiliary LMs and TMs
         self.aux_lms = nn.ModuleDict(aux_lms)
         self.aux_tms = nn.ModuleDict(aux_tms)
+
+        self.mdr = mdr
+        if mdr > 0.:
+            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([1.]))
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -61,6 +66,12 @@ class AEVNMT(nn.Module):
 
     def tm_parameters(self):
         return chain(self.tgt_embedder.parameters(), self.translation_model.parameters())
+   
+    def lagrangian_parameters(self):
+        if self.mdr > 0.:
+            return [self.mdr_lag_weight]
+        else:
+            return None
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
@@ -163,7 +174,7 @@ class AEVNMT(nn.Module):
         for c, (aux_name, aux_likelihood) in enumerate(aux_tm_likelihoods.items()):
             out_dict['tm/' + aux_name] = self.log_likelihood_tm(aux_name, aux_likelihood, targets_y)
             side_tm_likelihood[c] = out_dict['tm/' + aux_name]
-       
+
         if not self.mixture_likelihood:
             # ELBO
             #  E_q[ \log P(x|z,c=main) P(y|z,x,c=main)] - KL(q(z) || p(z)) 
@@ -213,6 +224,11 @@ class AEVNMT(nn.Module):
             out_dict['tm/main'] = tm_mixture
             out_dict['lm/recurrent'] = lm_log_likelihood
             out_dict['tm/recurrent'] = tm_log_likelihood
+
+        # Add MDR constraint.
+        if self.mdr > 0.:
+            constraint = self.mdr_lag_weight * (self.mdr - KL.mean()) 
+            loss = loss + constraint
 
         # Return differently according to the reduction setting.
         if reduction == "mean":
