@@ -9,9 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical, Bernoulli, Poisson
-from dgm import register_conditional_parameterization
-from dgm.conditional import MADEConditioner
-from dgm.likelihood import AutoregressiveLikelihood
+from probabll.dgm import register_conditional_parameterization
+from probabll.dgm.conditional import MADEConditioner
+from probabll.dgm.likelihood import AutoregressiveLikelihood
 from .rnnlm import RNNLM
 
 from aevnmt.components.nibm1 import NeuralIBM1
