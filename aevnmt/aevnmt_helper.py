@@ -1,12 +1,15 @@
 from collections import defaultdict
 from typing import Dict
+import re
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from torch.distributions import Normal
+from torch.distributions import Normal, kl_divergence
 from torch.utils.data import DataLoader
+
+from probabll.distributions import ProductOfDistributions
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
@@ -18,7 +21,9 @@ from aevnmt.models.generative import GenerativeTM, IndependentTM, CorrelatedBern
 from aevnmt.models.generative import CorrelatedPoissonsTM, IBM1TM, AttentionBasedTM
 from aevnmt.models.inference import InferenceModel, BasicInferenceModel, SwitchingInferenceModel
 from aevnmt.models.inference import get_inference_encoder, combine_inference_encoders
-from aevnmt.dist import get_named_params
+from aevnmt.dist import get_named_params, create_prior
+from aevnmt.dist import ProductOfPriorsLayer, ProductOfConditionalsLayer
+from aevnmt.dist import NormalLayer, KumaraswamyLayer, HardKumaraswamyLayer
 
 from .train_utils import create_attention, create_encoder, create_decoder, attention_summary, compute_bleu
 
@@ -43,38 +48,26 @@ def create_aux_language_models(vocab_src, src_embedder, hparams) -> Dict[str, Ge
     if hparams.bow_loss:
         lms['bow'] = IndependentLM(
             latent_size=hparams.latent_size, 
-            vocab_size=src_embedder.num_embeddings, 
-            pad_idx=src_embedder.padding_idx)
+            embedder=src_embedder,
+            tied_embeddings=False)
     if hparams.MADE_loss:
         lms['made'] = CorrelatedBernoullisLM(
             vocab_size=src_embedder.num_embeddings, 
             latent_size=hparams.latent_size, 
             hidden_sizes=[hparams.hidden_size, hparams.hidden_size],  # TODO: generalise
             pad_idx=src_embedder.padding_idx, 
-            num_masks=10,  # TODO: generalise
-            resample_mask_every=10)  # TODO: generalise
+            num_masks=1,  
+            resample_mask_every=0)  
     if hparams.count_MADE_loss:
         lms['count_made'] = CorrelatedPoissonsLM(
             vocab_size=src_embedder.num_embeddings, 
             latent_size=hparams.latent_size, 
             hidden_sizes=[hparams.hidden_size, hparams.hidden_size],  # TODO: generalise
             pad_idx=src_embedder.padding_idx, 
-            num_masks=10,  # TODO: generalise
-            resample_mask_every=10)  # TODO: generalise
-    if hparams.shuffle_lm:  # TODO: implement shuffling 
-        lms['shuffled'] = CorrelatedCategoricalsLM(
-            embedder=src_embedder,
-            sos_idx=vocab_src[SOS_TOKEN],
-            eos_idx=vocab_src[EOS_TOKEN],
-            latent_size=hparams.latent_size,
-            hidden_size=hparams.hidden_size,
-            dropout=hparams.dropout,
-            num_layers=hparams.num_dec_layers,
-            cell_type=hparams.cell_type,
-            tied_embeddings=hparams.tied_embeddings,
-            feed_z=hparams.feed_z,
-            gate_z=False  # TODO implement
-        )
+            num_masks=1,  
+            resample_mask_every=0)  
+    if hparams.shuffle_lm:  
+        raise NotImplementedError("This is not yet supported")
     return lms
 
 
@@ -83,36 +76,26 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
     if hparams.bow_loss_tl:
         tms['bow'] = IndependentTM(
             latent_size=hparams.latent_size,
-            vocab_size=tgt_embedder.num_embeddings,
-            pad_idx=tgt_embedder.padding_idx)
+            embedder=tgt_embedder,
+            tied_embeddings=hparams.tied_embeddings)  
     if hparams.MADE_loss_tl:
         tms['made'] = CorrelatedBernoullisTM(
             vocab_size=tgt_embedder.num_embeddings, 
             latent_size=hparams.latent_size, 
             hidden_sizes=[hparams.hidden_size, hparams.hidden_size], 
             pad_idx=tgt_embedder.padding_idx,
-            num_masks=10,  # TODO: generalise
-            resample_mask_every=10)  # TODO: generalise
+            num_masks=1,
+            resample_mask_every=0) 
     if hparams.count_MADE_loss_tl:
         tms['count_made'] = CorrelatedPoissonsTM(
             vocab_size=tgt_embedder.num_embeddings, 
             latent_size=hparams.latent_size, 
             hidden_sizes=[hparams.hidden_size, hparams.hidden_size], 
             pad_idx=tgt_embedder.padding_idx,
-            num_masks=10,  # TODO: generalise
-            resample_mask_every=10)  # TODO: generalise
-    if hparams.shuffle_lm_tl:  # TODO: implement shuffling
-        tms['shuffled'] = CorrelatedCategoricalsTM(
-            embedder=tgt_embedder,
-            latent_size=hparams.latent_size,
-            hidden_size=hparams.hidden_size,
-            dropout=hparams.dropout,
-            num_layers=hparams.num_dec_layers,
-            cell_type=hparams.cell_type,
-            tied_embeddings=hparams.tied_embeddings,
-            feed_z=hparams.feed_z,
-            gate_z=False  # TODO implement
-        )
+            num_masks=1,
+            resample_mask_every=0) 
+    if hparams.shuffle_lm_tl: 
+        raise NotImplementedError("This is not yet supported")
     if hparams.ibm1_loss:
         tms['ibm1'] = IBM1TM(
             src_embed=src_embedder,
@@ -124,15 +107,15 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
     return tms
 
 
-def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceModel:
+def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) -> InferenceModel:
     """Create an inference model and configure its encoder"""
     if not hparams.inf3:
         # Inference components
         inf_encoder = get_inference_encoder(
             encoder_style=hparams.inf_encoder_style,
             conditioning_context=hparams.inf_conditioning,
-            embedder_x=DetachedEmbeddingLayer(src_embedder),
-            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            embedder_x=src_embedder,
+            embedder_y=tgt_embedder,
             hidden_size=hparams.hidden_size,
             rnn_bidirectional=hparams.bidirectional,
             rnn_num_layers=hparams.num_enc_layers,
@@ -143,20 +126,33 @@ def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceMode
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
             composition="maxpool" if hparams.max_pooling_states else "avg")
+        if len(latent_sizes) != len(hparams.posterior.split(";")):
+            raise ValueError("You need as many posteriors as you have priors")
+        conditioners = []
+        for family, latent_size in zip(hparams.posterior.split(";"), latent_sizes):
+            family = family.strip().lower()
+            if family == "gaussian":
+                conditioners.append(NormalLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+            elif family == "kumaraswamy":
+                conditioners.append(KumaraswamyLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+            elif family == "hardkumaraswamy":
+                conditioners.append(HardKumaraswamyLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+            else:
+                raise NotImplementedError("I cannot design %s posterior approximation." % family)
         inf_model = BasicInferenceModel(
-            family=hparams.posterior,
             latent_size=hparams.latent_size,
-            hidden_size=hparams.hidden_size,
+            conditioner=conditioners[0] if len(conditioners) == 1 else ProductOfConditionalsLayer(conditioners),
             encoder=inf_encoder)
     else:  # create 3 inference models and wrap them around a single container
+        # TODO: compatible with multiple priors?
         enc_styles = hparams.inf3.split(',')
         if len(enc_styles) != 3:
             raise ValueError("Specify exactly 3 comma-separated encoder styles, got '%s'" % hparams.inf3)
         encoder_x = get_inference_encoder(
             encoder_style=enc_styles[0],
             conditioning_context='x',
-            embedder_x=DetachedEmbeddingLayer(src_embedder),
-            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            embedder_x=src_embedder,
+            embedder_y=tgt_embedder,
             hidden_size=hparams.hidden_size,
             rnn_bidirectional=hparams.bidirectional,
             rnn_num_layers=hparams.num_enc_layers,
@@ -170,8 +166,8 @@ def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceMode
         encoder_y = get_inference_encoder(
             encoder_style=enc_styles[1],
             conditioning_context='y',
-            embedder_x=DetachedEmbeddingLayer(src_embedder),
-            embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+            embedder_x=src_embedder,
+            embedder_y=tgt_embedder,
             hidden_size=hparams.hidden_size,
             rnn_bidirectional=hparams.bidirectional,
             rnn_num_layers=hparams.num_enc_layers,
@@ -188,8 +184,8 @@ def create_inference_model(src_embedder, tgt_embedder, hparams) -> InferenceMode
             encoder_xy = get_inference_encoder(
                 encoder_style=enc_styles[2],
                 conditioning_context='xy',
-                embedder_x=DetachedEmbeddingLayer(src_embedder),
-                embedder_y=DetachedEmbeddingLayer(tgt_embedder),
+                embedder_x=src_embedder,
+                embedder_y=tgt_embedder,
                 hidden_size=hparams.hidden_size,
                 rnn_bidirectional=hparams.bidirectional,
                 rnn_num_layers=hparams.num_enc_layers,
@@ -258,8 +254,30 @@ def create_model(hparams, vocab_src, vocab_tgt):
         feed_z=hparams.feed_z,
         tied_embeddings=hparams.tied_embeddings
     )
-        
-    inf_model = create_inference_model(src_embedder, tgt_embedder, hparams)
+   
+    priors = []
+    n_priors = len(hparams.prior.split(";"))
+    if hparams.latent_sizes:
+        latent_sizes = [int(size) for size in re.split('[ ;:,]+', hparams.latent_sizes.strip())]
+        if len(latent_sizes) != n_priors:
+            raise ValueError("You need to specify a latent_size for each prior using --latent_sizes 'list'")
+        if sum(latent_sizes) != hparams.latent_size:
+            raise ValueError("The sum of latent_sizes must equal latent_size")
+    else:
+        if hparams.latent_size % n_priors != 0:
+            raise ValueError("Use a latent size multiple of the number of priors")
+        latent_sizes = [hparams.latent_size // n_priors] * n_priors
+    for prior_family, prior_params, latent_size in zip(hparams.prior.split(";"), hparams.prior_params.split(";"), latent_sizes):
+        prior_params = [float(param) for param  in prior_params.split()]
+        priors.append(create_prior(prior_family, latent_size, prior_params))
+
+    inf_model = create_inference_model(
+        DetachedEmbeddingLayer(src_embedder) if hparams.inf_share_embeddings else torch.nn.Embedding(
+            src_embedder.num_embeddings, src_embedder.embedding_dim, padding_idx=src_embedder.padding_idx),
+        DetachedEmbeddingLayer(tgt_embedder) if hparams.inf_share_embeddings else torch.nn.Embedding(
+            tgt_embedder.num_embeddings, tgt_embedder.embedding_dim, padding_idx=tgt_embedder.padding_idx),
+        latent_sizes,
+        hparams)
 
     model = AEVNMT(
         latent_size=hparams.latent_size,
@@ -271,8 +289,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
         dropout=hparams.dropout,
         feed_z=hparams.feed_z,
         tied_embeddings=hparams.tied_embeddings,
-        prior_family=hparams.prior,
-        prior_params=hparams.prior_params,
+        prior=priors[0] if len(priors) == 1 else ProductOfPriorsLayer(priors),
         aux_lms=aux_lms,
         aux_tms=aux_tms,
         mixture_likelihood=hparams.mixture_likelihood,
@@ -296,12 +313,24 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
         KL_weight = 1.
 
     # Compute the loss.
+    loss_cfg = None
+    #if step < 20000:
+    #    loss_cfg = {'lm/bow', }  #, 'tm/bow'}
+    #else:  #if step < 20000:
+    #    loss_cfg = {'lm/made', } #, 'tm/made'}
+    #elif step < 3000:
+    #    loss_cfg = {'lm/made', 'lm/made_count', 'tm/made', 'tm/made_count'}
+    #elif step < 4500:
+    #    loss_cfg = {'lm/made', 'lm/made_count', 'lm/main', 'tm/made', 'tm/made_count', 'tm/main'}
+    #else: 
+    #    loss_cfg = {'lm/main', 'tm/main'}
     loss = model.loss(tm_likelihood, lm_likelihood, y_out, x_out, qz,
                       free_nats=hparams.KL_free_nats,
                       KL_weight=KL_weight,
                       reduction="mean",
                       aux_lm_likelihoods=aux_lm_likelihoods,
-                      aux_tm_likelihoods=aux_tm_likelihoods)
+                      aux_tm_likelihoods=aux_tm_likelihoods,
+                      loss_cfg=loss_cfg)
 
     if summary_writer:
         summary_writer.add_histogram("posterior/z", z, step)
@@ -341,10 +370,16 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     for comp_name, comp_nll in sorted(val_NLLs.items()):
         if comp_name.startswith('tm/'):
             nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
+    
+    kl_str = f"-- KL = {val_KL.sum():.2f}"
+    if isinstance(model.prior(), ProductOfDistributions):
+        for i, p in enumerate(model.prior().distributions):
+            kl_str += f" -- KL{i} = {val_KL[i]:.2f}" 
+        
     print(f"direction = {title}\n"
           f"validation perplexity = {val_ppl:,.2f}"
           f" -- BLEU = {val_bleu:.2f}"
-          f" -- KL = {val_KL:.2f}"
+          f" {kl_str}"
           f" {nll_str}\n"
           f"- Source: {inputs[random_idx]}\n"
           f"- Target: {refs[random_idx]}\n"
@@ -365,7 +400,10 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     if summary_writer is not None:
         summary_writer.add_scalar(f"{title}/validation/BLEU", val_bleu, step)
         summary_writer.add_scalar(f"{title}/validation/perplexity", val_ppl, step)
-        summary_writer.add_scalar(f"{title}/validation/KL", val_KL, step)
+        summary_writer.add_scalar(f"{title}/validation/KL", val_KL.sum(), step)
+        if isinstance(model.prior(), ProductOfDistributions):
+            for i, _ in enumerate(model.prior().distributions):
+                summary_writer.add_scalar(f"{title}/validation/KL{i}", val_KL[i], step)
         for comp_name, comp_value in val_NLLs.items():
             summary_writer.add_scalar(f"{title}/validation/NLL/{comp_name}", comp_value, step)
 
@@ -394,7 +432,9 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         # For translation we use the approximate posterior mean.
         qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x,
                 y=x_in, seq_mask_y=seq_mask_x, seq_len_y=seq_len_x) # TODO: here we need a prediction net!
-        z = qz.mean if deterministic else qz.sample()
+        # TODO: restore some form of deterministic decoding
+        #z = qz.mean if deterministic else qz.sample()
+        z = qz.sample()
 
         encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
         hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
@@ -471,7 +511,12 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
             # Infer q(z|x) for this batch.
             qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
             pz = model.prior()  
-            total_KL += torch.distributions.kl.kl_divergence(qz, pz).sum().item()
+            if isinstance(qz, ProductOfDistributions):
+                total_KL += torch.cat(
+                    [kl_divergence(qi, pi).sum(0).unsqueeze(-1) for qi, pi in zip(qz.distributions, pz.distributions)], 
+                    -1)
+            else:
+                total_KL += kl_divergence(qz, pz).sum(0)
 
             # Take s importance samples from q(z|x):
             # log int{p(x, y, z) dz} ~= log sum_z{p(x, y, z) / q(z|x)} where z ~ q(z|x)
@@ -493,7 +538,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_lm_prob = model.language_model.log_prob(lm_likelihood, x_out)
                 
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
-                log_pz = pz.log_prob(z) # [B, latent_size] -> [B]
+                log_pz = pz.log_prob(z) 
                 log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)

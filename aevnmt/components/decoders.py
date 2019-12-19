@@ -14,7 +14,8 @@ def tile_rnn_hidden_for_decoder(hidden, decoder):
 class BahdanauDecoder(nn.Module):
 
     def __init__(self, emb_size, hidden_size, attention,
-                 dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True, feed_z_size=0):
+            dropout=0., num_layers=1, cell_type="lstm", init_from_encoder_final=True, 
+            feed_z_size=0):
         """
         RNN decoder with Bahdanau style updates.
         """
@@ -69,7 +70,7 @@ class BahdanauDecoder(nn.Module):
         query = query[-1].unsqueeze(1)
         prev_embed = prev_embed.unsqueeze(1)
         context, att_weights = self.attention(query, x_mask, encoder_outputs)
-
+        
         # Update the RNN hidden state.
         rnn_input = torch.cat([prev_embed, context], dim=-1)
         rnn_output, hidden = self.rnn(rnn_input, hidden)

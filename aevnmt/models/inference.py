@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from torch.distributions import Distribution
 
 from aevnmt.dist import NormalLayer, KumaraswamyLayer
+from aevnmt.dist import Conditioner
 from aevnmt.components import RNNEncoder, TransformerEncoder
 from aevnmt.components import DecomposableAttentionEncoder
 
@@ -278,20 +279,14 @@ class BasicInferenceModel(InferenceModel):
     Encodes the inputs using an encoder and then parameterises a variational family.
     """
 
-    def __init__(self, family: str, latent_size: int, hidden_size: int, encoder: InferenceEncoder):
+    def __init__(self, latent_size: int, conditioner: Conditioner,  encoder: InferenceEncoder):
         """
         :param src_embedder: uses this embedder, but detaches its output from the graph as to not compute
                              gradients for it.
         """
         super().__init__(latent_size)
-        self.family = family
         self.encoder = encoder
-        if family == "gaussian":
-            self.conditioner = NormalLayer(encoder.output_size, hidden_size, latent_size)
-        elif family == "kumaraswamy":
-            self.conditioner = KumaraswamyLayer(encoder.output_size, hidden_size, latent_size)
-        else:
-            raise NotImplementedError("I cannot design %s posterior approximation." % family)
+        self.conditioner = conditioner
 
     def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y) -> Distribution:
         # [B, D]

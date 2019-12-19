@@ -5,21 +5,20 @@ from itertools import chain
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Distribution, Independent, Categorical 
+from torch.distributions import Distribution, Categorical 
 
-from aevnmt.dist import get_named_params
+from aevnmt.dist import PriorLayer, get_named_params
 
 from .generative import GenerativeLM, GenerativeTM
 from .inference import InferenceModel
-
-from probabll.distributions import MixtureOfGaussians
 
 
 class AEVNMT(nn.Module):
 
     def __init__(self, latent_size, src_embedder, tgt_embedder, 
             language_model: GenerativeLM, translation_model: GenerativeTM, inference_model: InferenceModel,
-            dropout, tied_embeddings, prior_family: str, prior_params: list, 
+            prior: PriorLayer, 
+            dropout, tied_embeddings,
             feed_z=False,  
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):
@@ -40,47 +39,7 @@ class AEVNMT(nn.Module):
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
         # they will be moved to the appropriate device on which the model is run.
-        self.prior_family = prior_family
-        if prior_family == "gaussian":
-            if not prior_params:
-                prior_params = [0., 1.]
-            if len(prior_params) != 2:
-                raise ValueError("Specify the Gaussian prior using a location and a strictly positive scale.")
-            if prior_params[1] <= 0:
-                raise ValueError("The scale of a Gaussian distribution is strictly positive: %r" % prior_params)
-            self.register_buffer("prior_loc", torch.zeros([latent_size]))
-            self.register_buffer("prior_scale", torch.ones([latent_size]))
-        elif prior_family == "beta":
-            if not prior_params:
-                prior_params = [0.5, 0.5]
-            if len(prior_params) != 2:
-                raise ValueError("Specify the Beta prior using two strictly positive shape parameters.")
-            if prior_params[0] <= 0. or prior_params[1] <= 0.:
-                raise ValueError("The shape parameters of a Beta distribution are strictly positive: %r" % prior_params)
-            self.register_buffer("prior_a", torch.full([latent_size], prior_params[0]))
-            self.register_buffer("prior_b", torch.full([latent_size], prior_params[1]))
-            if inference_model.family != "kumaraswamy":
-                raise ValueError("I think you forgot to change your posterior distribution to something with support (0,1)")
-        elif prior_family == "mog":
-            if not prior_params:
-                prior_params = [10, 10, 0.5]
-            if len(prior_params) != 3:
-                raise ValueError("Specify the MoG prior using a number of components, a radius (for initialisation), and a strictly positive scale.")
-            num_components = prior_params[0]
-            if num_components <= 1:
-                raise ValueError("An MoG prior requires more than 1 component.")
-            prior_radius = prior_params[1]
-            if prior_radius <= 0:
-                raise ValueError("Initialising the MoG prior takes a strictly positive radius.")
-            prior_scale = prior_params[2]
-            if prior_scale <= 0:
-                raise ValueError("The prior variance must be strictly positive.")
-            # uniform prior over components
-            self.register_buffer("prior_logits", torch.ones(num_components))
-            self.register_buffer("prior_locations", - prior_radius + torch.rand([num_components, latent_size]) * 2 * prior_radius )
-            self.register_buffer("prior_scales", torch.full([num_components, latent_size], prior_scale))
-        else:
-            raise NotImplementedError("I cannot impose a %s prior on the latent code." % prior_family)
+        self.prior = prior
 
     def inference_parameters(self):
         return self.inference_model.parameters()
@@ -108,15 +67,6 @@ class AEVNMT(nn.Module):
         Returns an approximate posterior distribution q(z|x, y).
         """
         return self.inference_model(x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y)
-
-    def prior(self) -> Distribution:
-        if self.prior_family == "gaussian":
-            p = Independent(torch.distributions.Normal(loc=self.prior_loc, scale=self.prior_scale), 1)
-        elif self.prior_family == "beta":
-            p = Independent(torch.distributions.Beta(self.prior_a, self.prior_b), 1)
-        elif self.prior_family == "mog":
-            p = MixtureOfGaussians(logits=self.prior_logits, locations=self.prior_locations, scales=self.prior_scales)
-        return p
 
     def src_embed(self, x):
         x_embed = self.src_embedder(x)
@@ -162,7 +112,7 @@ class AEVNMT(nn.Module):
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
-            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict()):
+            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict(), loss_cfg=set()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -190,7 +140,6 @@ class AEVNMT(nn.Module):
         # Compute the KL divergence between the distribution used to sample z, and the prior
         # distribution.
         pz = self.prior()
-
         KL = torch.distributions.kl.kl_divergence(qz, pz)
         raw_KL = KL * 1
 
@@ -223,10 +172,18 @@ class AEVNMT(nn.Module):
             elbo = tm_log_likelihood + lm_log_likelihood - KL
             # we sum the alternative views (as in multitask learning)
             aux_log_likelihood = side_lm_likelihood.sum(0) + side_tm_likelihood.sum(0)
-            loss = - (elbo + aux_log_likelihood)
+
             # main log-likelihoods
             out_dict['lm/main'] = lm_log_likelihood
             out_dict['tm/main'] = tm_log_likelihood
+            
+            if not loss_cfg:
+                loss = - (elbo + aux_log_likelihood)
+            else:
+                loss = KL
+                for name in loss_cfg:
+                    if name in out_dict:
+                        loss = loss - out_dict[name]
         else: 
             # ELBO uses mixture models for X|z and Y|z,x:
             #  E_q[ \log P(x|z) + \log P(y|z,x)] - KL(q(z) || p(z))

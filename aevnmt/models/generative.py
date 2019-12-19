@@ -9,9 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical, Bernoulli, Poisson
-from dgm import register_conditional_parameterization
-from dgm.conditional import MADEConditioner
-from dgm.likelihood import AutoregressiveLikelihood
+from probabll.dgm import register_conditional_parameterization
+from probabll.dgm.conditional import MADEConditioner
+from probabll.dgm.likelihood import AutoregressiveLikelihood
 from .rnnlm import RNNLM
 
 from aevnmt.components.nibm1 import NeuralIBM1
@@ -64,10 +64,22 @@ class IndependentLM(GenerativeLM):
     where m = |x|.
     """
 
-    def __init__(self, latent_size, vocab_size, pad_idx):
+    def __init__(self, latent_size, embedder, tied_embeddings=True, dropout=0.5):
         super().__init__()
-        self.pad_idx = pad_idx
-        self.output_layer = nn.Linear(latent_size, vocab_size, bias=True)
+        vocab_size = embedder.num_embeddings
+        self.pad_idx = embedder.padding_idx
+
+        if tied_embeddings:
+            self.encoder = nn.Sequential(
+                    nn.Dropout(dropout),
+                    nn.Linear(latent_size, embedder.embedding_dim, bias=False),
+                    nn.Tanh(),
+                    nn.Dropout(dropout)
+            )
+            self.output_matrix = embedder.weight  # [V, Dx]
+        else:
+            self.encoder = nn.Dropout(dropout)
+            self.output_matrix = nn.Parameter(torch.randn(vocab_size, latent_size))  # [V, Dz]
     
     def forward(self, x, z, state=dict()) -> Categorical:
         """
@@ -75,8 +87,10 @@ class IndependentLM(GenerativeLM):
             X_i|z ~ Cat(f(z))
         with shape [B, 1, Vx]
         """
+        # [B, Vx]
+        logits = F.linear(self.encoder(z), self.output_matrix)
         # [B, 1, Vx]
-        return Categorical(logits=self.output_layer(z).unsqueeze(1))
+        return Categorical(logits=logits.unsqueeze(1))
     
     def log_prob(self, likelihood: Categorical, x):
         # [B, Tx, Vx]
@@ -108,7 +122,7 @@ class CorrelatedBernoullisLM(GenerativeLM):
     where V is the vocabulary size and b(z,x) \in (0, 1)^V is autoregressive in x (we use a MADE).
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.pad_idx = pad_idx
         self.resample_every = resample_mask_every
@@ -184,7 +198,7 @@ class CorrelatedPoissonsLM(GenerativeLM):
     and b(z,x) \in (0, infty)^V is autoregressive in x (we use a MADE).
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.pad_idx = pad_idx
         self.resample_every = resample_mask_every
@@ -392,12 +406,10 @@ class IndependentTM(GenerativeTM):
     where n = |y|. Note that the parameterisation currently ignores x.
     """
 
-    def __init__(self, latent_size, vocab_size, pad_idx):
+    def __init__(self, latent_size, embedder, tied_embeddings):
         super().__init__()
         self.tgt_independent_lm = IndependentLM(
-            latent_size=latent_size, 
-            vocab_size=vocab_size, 
-            pad_idx=pad_idx)
+            latent_size=latent_size, embedder=embedder, tied_embeddings=tied_embeddings)
     
     def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Categorical:
         return self.tgt_independent_lm(y, z)
@@ -418,7 +430,7 @@ class CorrelatedBernoullisTM(GenerativeTM):
     Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.correlated_bernoullis_lm = CorrelatedBernoullisLM(
             vocab_size=vocab_size,
@@ -450,7 +462,7 @@ class CorrelatedPoissonsTM(GenerativeTM):
     Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.correlated_poissons_lm = CorrelatedPoissonsLM(
             vocab_size=vocab_size,
