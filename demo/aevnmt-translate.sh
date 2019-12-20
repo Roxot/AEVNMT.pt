@@ -6,7 +6,7 @@ TAG=flickr
 SRC=de
 TGT=en
 DATA=${TAG}/data
-TRAINED_MODEL=${TAG}/models/aevnmt/supervised
+TRAINED_MODEL=${TAG}/models/aevnmt/supervised.${SRC}-${TGT}
 
 python -m aevnmt.translate \
     --src ${SRC} \

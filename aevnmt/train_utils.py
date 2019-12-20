@@ -166,11 +166,16 @@ def model_parameter_count(model):
 def parameter_count(param_generator):
     return sum(p.numel() for p in param_generator if p.requires_grad)
 
-def gradient_norm(model):
+def gradient_norm(model, skip_null=False):
     total_norm = 0.
     for p in model.parameters():
-        param_norm = p.grad.data.norm(2)
-        total_norm += param_norm.item() ** 2
+        if skip_null:  # this way we skip the parameter
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        else:  # this way we will get an exception if the parameter does not have gradient
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
     total_norm = np.sqrt(total_norm)
     return total_norm
 
