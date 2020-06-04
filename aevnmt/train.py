@@ -136,7 +136,10 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 tokens_per_sec = num_tokens / elapsed if step != 0 else 0
                 grad_norm = gradient_norm(model, skip_null=True)  # use False if you prefer exceptions for null grad
 
-                displaying = f"raw KL = {return_dict['raw_KL'].mean().item():,.2f}"
+                if 'raw_KL' in return_dict:
+                    displaying = f"raw KL = {return_dict['raw_KL'].mean().item():,.2f}"
+                else:
+                    displaying = f""
                 # - log P(x|z) for the various source LM decoders
                 for comp_name, comp_value in sorted(return_dict.items()):
                     if comp_name.startswith('lm/'):
