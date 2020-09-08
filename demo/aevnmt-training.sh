@@ -4,7 +4,7 @@ TAG=flickr
 SRC=de
 TGT=en
 DATA=${TAG}/data
-OUTPUT=${TAG}/models/aevnmt/supervised
+OUTPUT=${TAG}/models/aevnmt/supervised.${SRC}-${TGT}
 HPARAMS=hparams/aevnmt_supervised_flickr.json
 
 mkdir -p ${OUTPUT}

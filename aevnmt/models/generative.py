@@ -9,9 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical, Bernoulli, Poisson
-from dgm import register_conditional_parameterization
-from dgm.conditional import MADEConditioner
-from dgm.likelihood import AutoregressiveLikelihood
+from probabll.dgm import register_conditional_parameterization
+from probabll.dgm.conditional import MADEConditioner
+from probabll.dgm.likelihood import AutoregressiveLikelihood
 from .rnnlm import RNNLM
 
 from aevnmt.components.nibm1 import NeuralIBM1
@@ -50,6 +50,12 @@ class GenerativeLM(nn.Module):
         """
         raise NotImplementedError("Implement me!")
 
+    def sample(self, z, max_len=100, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        raise NotImplementedError("Implement me!")
+
 
 class IndependentLM(GenerativeLM):
     """
@@ -58,10 +64,22 @@ class IndependentLM(GenerativeLM):
     where m = |x|.
     """
 
-    def __init__(self, latent_size, vocab_size, pad_idx):
+    def __init__(self, latent_size, embedder, tied_embeddings=True, dropout=0.5):
         super().__init__()
-        self.pad_idx = pad_idx
-        self.output_layer = nn.Linear(latent_size, vocab_size, bias=True)
+        vocab_size = embedder.num_embeddings
+        self.pad_idx = embedder.padding_idx
+
+        if tied_embeddings:
+            self.encoder = nn.Sequential(
+                    nn.Dropout(dropout),
+                    nn.Linear(latent_size, embedder.embedding_dim, bias=False),
+                    nn.Tanh(),
+                    nn.Dropout(dropout)
+            )
+            self.output_matrix = embedder.weight  # [V, Dx]
+        else:
+            self.encoder = nn.Dropout(dropout)
+            self.output_matrix = nn.Parameter(torch.randn(vocab_size, latent_size))  # [V, Dz]
     
     def forward(self, x, z, state=dict()) -> Categorical:
         """
@@ -69,8 +87,10 @@ class IndependentLM(GenerativeLM):
             X_i|z ~ Cat(f(z))
         with shape [B, 1, Vx]
         """
+        # [B, Vx]
+        logits = F.linear(self.encoder(z), self.output_matrix)
         # [B, 1, Vx]
-        return Categorical(logits=self.output_layer(z).unsqueeze(1))
+        return Categorical(logits=logits.unsqueeze(1))
     
     def log_prob(self, likelihood: Categorical, x):
         # [B, Tx, Vx]
@@ -82,6 +102,18 @@ class IndependentLM(GenerativeLM):
         # [B]
         log_p = log_p.sum(-1)
         return log_p
+    
+    def sample(self, z, max_len=100, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        raise NotImplementedError("Implement me!")
+        likelihood = self(None, z)  # TODO deal with max_len
+        if greedy:
+            x = torch.argmax(likelihood.logits, dim=-1)
+        else:
+            x = likelihood.sample()
+        return x
 
 class CorrelatedBernoullisLM(GenerativeLM):
     """
@@ -90,7 +122,7 @@ class CorrelatedBernoullisLM(GenerativeLM):
     where V is the vocabulary size and b(z,x) \in (0, 1)^V is autoregressive in x (we use a MADE).
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.pad_idx = pad_idx
         self.resample_every = resample_mask_every
@@ -138,6 +170,16 @@ class CorrelatedBernoullisLM(GenerativeLM):
         indicators = self.make_indicators(x)
         # [B, V] -> [B]
         return likelihood.log_prob(indicators).sum(-1)
+    
+    def sample(self, z, max_len=None, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        shape = [z.size(0), self.product_of_bernoullis.event_size]
+        if greedy:
+            raise NotImplementedError("Greedy decoding not implemented for MADE")
+        x = self.product_of_bernoullis.sample(z, torch.zeros(shape, dtype=z.dtype, device=z.device))
+        return x
 
 
 @register_conditional_parameterization(Poisson)
@@ -156,7 +198,7 @@ class CorrelatedPoissonsLM(GenerativeLM):
     and b(z,x) \in (0, infty)^V is autoregressive in x (we use a MADE).
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.pad_idx = pad_idx
         self.resample_every = resample_mask_every
@@ -203,6 +245,16 @@ class CorrelatedPoissonsLM(GenerativeLM):
         counts = self.make_counts(x)
         # [B, V] -> [B]
         return likelihood.log_prob(counts).sum(-1)
+    
+    def sample(self, z, max_len=None, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        shape = [z.size(0), self.product_of_poissons.event_size]
+        if greedy:
+            raise NotImplementedError("Greedy decoding not implemented for MADE")
+        x = self.product_of_poissons.sample(z, torch.zeros(shape, dtype=z.dtype, device=z.device))
+        return x
 
 
 class CorrelatedCategoricalsLM(GenerativeLM):
@@ -212,11 +264,13 @@ class CorrelatedCategoricalsLM(GenerativeLM):
     where m = |x|.
     """
 
-    def __init__(self, embedder, latent_size, hidden_size, 
+    def __init__(self, embedder, sos_idx, eos_idx, latent_size, hidden_size, 
             dropout, num_layers, cell_type, tied_embeddings, feed_z, gate_z):  #TODO implement gate_z
         super().__init__()
         self.embedder = embedder
         self.pad_idx = embedder.padding_idx
+        self.sos_idx = sos_idx
+        self.eos_idx = eos_idx
         self.feed_z = feed_z
         self.hidden_size = hidden_size
         self.init_layer = nn.Sequential(
@@ -232,29 +286,29 @@ class CorrelatedCategoricalsLM(GenerativeLM):
             self.output_matrix = nn.Parameter(torch.randn(embedder.num_embeddings, hidden_size))
         self.dropout_layer = nn.Dropout(p=dropout)
     
+    def init(self, z):
+        hidden = tile_rnn_hidden(self.init_layer(z), self.rnn)
+        return hidden
+
+    def generate(self, pre_output):
+        W = self.embedder.weight if self.tied_embeddings else self.output_matrix
+        return F.linear(pre_output, W)
+
     def step(self, x_embed, hidden, z):
         rnn_input = x_embed.unsqueeze(1)
         if self.feed_z:
             rnn_input=torch.cat([rnn_input, z.unsqueeze(1)], dim=-1)
         rnn_output, hidden = self.rnn(rnn_input, hidden)
         rnn_output = self.dropout_layer(rnn_output)
-        W_out = self.embedder.weight if self.tied_embeddings else self.output_matrix
-        logits = F.linear(rnn_output, W_out)
-        return hidden, logits
+        return hidden, rnn_output
 
     def unroll(self, x, hidden, z):
         # [B, Tx, Dx]
         x_embed = self.dropout_layer(self.embedder(x))
         outputs = []
         for t in range(x_embed.size(1)):
-            # [B, 1, Dx]
-            rnn_input = x_embed[:, t].unsqueeze(1)
-            if self.feed_z:
-                rnn_input=torch.cat([rnn_input, z.unsqueeze(1)],dim=-1)
-            rnn_output, hidden = self.rnn(rnn_input, hidden)
-            rnn_output = self.dropout_layer(rnn_output)
-            W_out = self.embedder.weight if self.tied_embeddings else self.output_matrix
-            logits = F.linear(rnn_output, W_out)
+            hidden, rnn_output = self.step(x_embed[:, t], hidden, z)
+            logits = self.generate(rnn_output)
             outputs.append(logits)
         return torch.cat(outputs, dim=1)
 
@@ -264,7 +318,7 @@ class CorrelatedCategoricalsLM(GenerativeLM):
             X_i|z, x_{<i} ~ Cat(f(z, x_{<i}))
         with shape [B, Tx, Vx]
         """
-        hidden = tile_rnn_hidden(self.init_layer(z), self.rnn)
+        hidden = self.init(z)
         # [B, Tx, Vx]
         logits = self.unroll(x, hidden=hidden, z=z) 
         return Categorical(logits=logits)
@@ -272,6 +326,38 @@ class CorrelatedCategoricalsLM(GenerativeLM):
     def log_prob(self, likelihood: Categorical, x):
         # [B, Tx] -> [B]
         return (likelihood.log_prob(x) * (x != self.pad_idx).float()).sum(-1)
+    
+    def sample(self, z, max_len=100, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        batch_size = z.size(0)
+        hidden = self.init(z)
+        prev_y = torch.full(size=[batch_size], fill_value=self.sos_idx, dtype=torch.long,
+            device=self.embedder.weight.device)
+
+        # Decode step-by-step by picking the maximum probability word
+        # at each time step.
+        predictions = []
+        log_probs = []
+        is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
+        for t in range(max_len):
+            prev_y = self.embedder(prev_y)
+            hidden, pre_output = self.step(prev_y, hidden, z)
+            logits = self.generate(pre_output)
+            px_z = Categorical(logits=logits)
+            if greedy:
+                prediction = torch.argmax(logits, dim=-1)
+            else:
+                prediction = px_z.sample()
+            prev_y = prediction.view(batch_size)
+            log_prob_pred = px_z.log_prob(prediction)
+            log_probs.append(torch.where(is_complete, torch.zeros_like(log_prob_pred), log_prob_pred))
+            predictions.append(torch.where(is_complete, torch.full_like(prediction, self.embedder.padding_idx), prediction))
+            is_complete = is_complete | (prediction == self.eos_idx).byte()
+
+        state['log_prob'] = torch.cat(log_probs, dim=1)
+        return torch.cat(predictions, dim=1)
 
 class GenerativeTM(nn.Module):
     """
@@ -307,6 +393,9 @@ class GenerativeTM(nn.Module):
         y: [B, Ty] observed token ids
         """
         raise NotImplementedError("Implement me!")
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        raise NotImplementedError("Implement me!")
 
 
 class IndependentTM(GenerativeTM):
@@ -316,18 +405,19 @@ class IndependentTM(GenerativeTM):
     where n = |y|. Note that the parameterisation currently ignores x.
     """
 
-    def __init__(self, latent_size, vocab_size, pad_idx):
+    def __init__(self, latent_size, embedder, tied_embeddings):
         super().__init__()
         self.tgt_independent_lm = IndependentLM(
-            latent_size=latent_size, 
-            vocab_size=vocab_size, 
-            pad_idx=pad_idx)
+            latent_size=latent_size, embedder=embedder, tied_embeddings=tied_embeddings)
     
     def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Categorical:
         return self.tgt_independent_lm(y, z)
     
     def log_prob(self, likelihood: Categorical, y):
         return self.tgt_independent_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
+        return self.tgt_independent_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 
 class CorrelatedBernoullisTM(GenerativeTM):
@@ -339,7 +429,7 @@ class CorrelatedBernoullisTM(GenerativeTM):
     Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.correlated_bernoullis_lm = CorrelatedBernoullisLM(
             vocab_size=vocab_size,
@@ -355,6 +445,9 @@ class CorrelatedBernoullisTM(GenerativeTM):
 
     def log_prob(self, likelihood: Bernoulli, y):
         return self.correlated_bernoullis_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_bernoullis_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 
 class CorrelatedPoissonsTM(GenerativeTM):
@@ -368,7 +461,7 @@ class CorrelatedPoissonsTM(GenerativeTM):
     Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=10, resample_mask_every=10):
+    def __init__(self, vocab_size, latent_size, hidden_sizes, pad_idx, num_masks=1, resample_mask_every=0):
         super().__init__()
         self.correlated_poissons_lm = CorrelatedPoissonsLM(
             vocab_size=vocab_size,
@@ -384,6 +477,9 @@ class CorrelatedPoissonsTM(GenerativeTM):
 
     def log_prob(self, likelihood: Poisson, y):
         return self.correlated_poissons_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_poissons_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 class CorrelatedCategoricalsTM(GenerativeTM):
     """
@@ -392,11 +488,13 @@ class CorrelatedCategoricalsTM(GenerativeTM):
     where n = |y|. Note that for now the parameterisation ignores x.
     """
 
-    def __init__(self, embedder, latent_size, hidden_size, 
+    def __init__(self, embedder, sos_idx, eos_idx, latent_size, hidden_size, 
             dropout, num_layers, cell_type, tied_embeddings, feed_z, gate_z):
         super().__init__()
         self.correlated_categoricals_lm = CorrelatedCategoricalsLM(
             embedder=embedder,
+            sos_idx=sos_idx,
+            eos_idx=eos_idx,
             latent_size=latent_size,
             hidden_size=hidden_size,
             dropout=dropout,
@@ -412,6 +510,9 @@ class CorrelatedCategoricalsTM(GenerativeTM):
 
     def log_prob(self, likelihood: Categorical, y):
         return self.correlated_categoricals_lm.log_prob(likelihood, y)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=None, greedy=False, state=dict()):
+        return self.correlated_poissons_lm(z, max_len=max_len, greedy=greedy, state=state)
 
 class IBM1TM(GenerativeTM):
     """
@@ -459,10 +560,13 @@ class IBM1TM(GenerativeTM):
 
 class AttentionBasedTM(GenerativeTM):
 
-    def __init__(self, src_embedder, tgt_embedder, encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
+    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx, 
+            encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
+        self.tgt_sos_idx = tgt_sos_idx
+        self.tgt_eos_idx = tgt_eos_idx
         self.encoder = encoder
         self.decoder = decoder
         self.encoder_init_layer = nn.Sequential(
@@ -524,3 +628,33 @@ class AttentionBasedTM(GenerativeTM):
 
     def log_prob(self, likelihood: Categorical, y):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
+
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
+        encoder_outputs, encoder_final = self.encode(x, seq_len_x, z)
+        hidden = self.init_decoder(encoder_outputs, encoder_final, z)
+        batch_size = seq_mask_x.size(0)
+        prev_y = torch.full(size=[batch_size], fill_value=self.tgt_sos_idx, dtype=torch.long, device=seq_mask_x.device)
+
+        # Decode step-by-step by picking the maximum probability word
+        # at each time step.
+        predictions = []
+        log_probs = []
+        is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
+        for t in range(max_len):
+            prev_y = self.tgt_embedder(prev_y)
+            pre_output, hidden, _ = self.decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs, z)
+            logits = self.generate(pre_output)
+            py_xz = Categorical(logits=logits)
+            if greedy:
+                prediction = torch.argmax(logits, dim=-1)
+            else:
+                prediction = py_xz.sample()
+            prev_y = prediction.view(batch_size)
+            log_prob_pred = py_xz.log_prob(prediction)
+            log_probs.append(torch.where(is_complete, torch.zeros_like(log_prob_pred), log_prob_pred))
+            predictions.append(torch.where(is_complete, torch.full_like(prediction, self.tgt_embedder.padding_idx), prediction))
+            is_complete = is_complete | (prediction == self.tgt_eos_idx).byte()
+
+        state['log_prob'] = torch.cat(log_probs, dim=1) 
+        return torch.cat(predictions, dim=1)
+

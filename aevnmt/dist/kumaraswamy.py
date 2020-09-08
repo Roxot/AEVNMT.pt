@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Beta, Independent
-from probabll.distributions import Kumaraswamy
+from probabll.distributions import Kumaraswamy, Stretched, Rectified01
 
 from aevnmt.dist import Conditioner
 
@@ -31,6 +31,41 @@ class KumaraswamyLayer(Conditioner):
     def forward(self, input_features):
         a, b = self.compute_parameters(input_features)
         return Independent(Kumaraswamy(a=a, b=b), 1)
+
+    def compute_parameters(self, input_features):
+        """
+        Return shape parameters (a, b) in R+^D.
+
+        Note we do constraint the shape parameters to (min_shape, max_shape) to avoid numerical instabilities, 
+        esp in the KL approximation.
+        """
+        pre_a = self.pre_a_layer(input_features)
+        pre_b = self.pre_b_layer(input_features)
+        a = torch.clamp(self.min_shape + F.softplus(pre_a), max=self.max_shape)
+        b = torch.clamp(self.min_shape + F.softplus(pre_b), max=self.max_shape)
+        return a, b
+
+
+class HardKumaraswamyLayer(Conditioner):
+    """
+    Parameterise a product of independent HardKumaraswamy distributions.
+        https://www.aclweb.org/anthology/P19-1284/
+    """
+
+    def __init__(self, input_dim, hidden_size, latent_size, min_shape=0.1, max_shape=2):
+        super().__init__()
+        self.min_shape = min_shape
+        self.max_shape = max_shape
+        self.pre_a_layer = nn.Sequential(nn.Linear(input_dim, hidden_size),
+                                     nn.ReLU(),
+                                     nn.Linear(hidden_size, latent_size))
+        self.pre_b_layer = nn.Sequential(nn.Linear(input_dim, hidden_size),
+                                       nn.ReLU(),
+                                       nn.Linear(hidden_size, latent_size))
+
+    def forward(self, input_features):
+        a, b = self.compute_parameters(input_features)
+        return Independent(Rectified01(Stretched(Kumaraswamy(a=a, b=b), lower=-0.1, upper=1.1)), 1)
 
     def compute_parameters(self, input_features):
         """

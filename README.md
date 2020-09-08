@@ -15,13 +15,13 @@ You will need an extension to torch distributions which you can install easily:
 git clone https://github.com/probabll/dists.pt.git
 cd dists.pt
 pip install -r requirements.txt
-python setup.py develop
+pip install .
 cd ..
 
 git clone https://github.com/probabll/dgm.pt.git
 cd dgm.pt
 pip install -r requirements.txt
-python setup.py develop
+pip install .
 ```
 
 Then you will need AEVNMT.pt: 
@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 For developers, we recommend
 ```bash
-python setup.py develop
+python install --editable .
 ```
 
 For other users, we recommend 

@@ -9,7 +9,7 @@ class ListOfInts(list):
             values = (int(v) for v in values.split())
         else:
             values = (int(v) for v in values)
-        super(ListOfInts, self).__init__(values)
+        super().__init__(values)
 
 
 class ListOfFloats(list):
@@ -19,7 +19,7 @@ class ListOfFloats(list):
             values = (float(v) for v in values.split())
         else:
             values = (float(v) for v in values)
-        super(ListOfFloats, self).__init__(values)
+        super().__init__(values)
 
 
 class ListOfStrings(list):
@@ -29,7 +29,17 @@ class ListOfStrings(list):
             values = (str(v) for v in values.split())
         else:
             values = (str(v) for v in values)
-        super(ListOfStrings, self).__init__(values)
+        super().__init__(values)
+
+
+class ListOfLists(list):
+
+    def __init__(self, values, dtype=ListOfFloats, separator=";"):
+        if isinstance(values, str):
+            values = (dtype(v) for v in values.split(';'))
+        else:
+            values = (dtype(v) for v in values)
+        super().__init__(values)
 
 
 options = {
@@ -64,10 +74,11 @@ options = {
     "model_type": (str, "cond_nmt", False, "The type of model to train:"
                                            " cond_nmt|aevnmt", 1),
     "prior": (str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)", 1),
-    "prior_params": (ListOfFloats, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
+    "prior_params": (str, "", False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
         "beta (a: default 0.5, b: default 0.5), "
         "mog (num_components: default 10, radius: default 10, scale: default 0.5)", 2),
-    "latent_size": (int, 32, False, "The size of the latent variables.", 1),
+    "latent_size": (int, 32, False, "The total size of the latent variable.", 1),
+    "latent_sizes": (str, "", False, "Use this to specify latent_size for each prior should you have multiple priors. Example '64;12' ", 1),
     "emb_size": (int, 32, False, "The source / target embedding size, this is also"
                                  " the model size in the transformer architecture.", 1),
     "emb_init_scale": (float, 0.01, False, "Scale of the Gaussian that is used to"
@@ -110,7 +121,9 @@ options = {
     "posterior": (str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 2),
     "inf_encoder_style": (str, "rnn", False, "The type of architecture: rnn|nli", 2),
     "inf_conditioning": (str, "x", False, "Conditioning context for q(z): x|xy", 2),
-
+    "inf3": (str, "", False, "Specify encoders for three different inference models, namely, q(z|x), q(z|y) and q(z|x,y), e.g. rnn,rnn,nli or rnn,rnn,comb. The special type 'comb' uses the other two encoders to make an encoding of the pair.", 2),  
+    "inf3_comb_composition": (str, "cat", False, "Composition function used to combined encodings for q(z|x,y) if --inf3 is set", 2),
+    "inf_share_embeddings": (bool, False, False, "Should the inference model borrow embeddings from generative model?", 2),
 
     # Decoding hyperparameters.
     "max_decoding_length": (int, 50, False, "Maximum decoding length", 3),
