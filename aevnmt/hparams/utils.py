@@ -2,34 +2,28 @@ import functools
 from argparse import ArgumentTypeError
 
 
-class ListOfInts(list):
-
-    def __init__(self, values):
-        if isinstance(values, str):
-            values = (int(v) for v in values.split())
-        else:
-            values = (int(v) for v in values)
-        super(ListOfInts, self).__init__(values)
+def str_to_str_list(values):
+    if isinstance(values, str):
+        values = (str(v) for v in values.split())
+    else:
+        values = (str(v) for v in values)
+    return list(values)
 
 
-class ListOfFloats(list):
-
-    def __init__(self, values):
-        if isinstance(values, str):
-            values = (float(v) for v in values.split())
-        else:
-            values = (float(v) for v in values)
-        super(ListOfFloats, self).__init__(values)
+def str_to_float_list(values):
+    if isinstance(values, str):
+        values = (float(v) for v in values.split())
+    else:
+        values = (float(v) for v in values)
+    return list(values)
 
 
-class ListOfStrings(list):
-
-    def __init__(self, values):
-        if isinstance(values, str):
-            values = (str(v) for v in values.split())
-        else:
-            values = (str(v) for v in values)
-        super(ListOfStrings, self).__init__(values)
+def str_to_int_list(values):
+    if isinstance(values, str):
+        values = (int(v) for v in values.split())
+    else:
+        values = (int(v) for v in values)
+    return list(values)
 
 
 def str_to_bool(v):

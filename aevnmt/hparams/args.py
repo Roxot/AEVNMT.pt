@@ -1,4 +1,4 @@
-from .utils import ListOfStrings, ListOfInts, ListOfFloats
+from .utils import str_to_str_list, str_to_int_list, str_to_float_list, str_to_bool
 
 io_args = {
     "training_prefix": (str, None, True, "The prefix to bilingual training data.", 0),
@@ -14,14 +14,14 @@ io_args = {
     "subword_token": (str, None, False, "The subword token, e.g. \"@@\".", 0),
     "max_sentence_length": (int, -1, False, "The maximum sentence length during"
                                             " training.", 0),
-    "vocab_prefix": ("vocab.prefix", str, None, False, "The vocabulary prefix, if share_vocab is True"
+    "vocab.prefix": (str, None, False, "The vocabulary prefix, if share_vocab is True"
                                        " this should be the vocabulary filename.", 0),
-    "share_vocab": ("vocab.shared", bool, False, False, "Whether to share the vocabulary between the"
+    "vocab.shared": (bool, False, False, "Whether to share the vocabulary between the"
                                        " source and target language", 0),
-    "max_vocab_size": ("vocab.max_size", int, -1, False, "The maximum vocabulary size.", 0),
-    "vocab_min_freq": ("vocab.min_freq", int, 0, False, "The minimum frequency of a word for it"
+    "vocab.max_size": (int, -1, False, "The maximum vocabulary size.", 0),
+    "vocab.min_freq": (int, 0, False, "The minimum frequency of a word for it"
                                       " to be included in the vocabulary.", 0),
-    "model_checkpoint": ("model.checkpoint", str, None, False, "Checkpoint to restore the model from at"
+    "model.checkpoint": (str, None, False, "Checkpoint to restore the model from at"
                                         " the beginning of training.", 0),
 }
 
@@ -30,47 +30,48 @@ model_args = {
     # `group` is for ordering purposes when printing.
 
     # General model hyperparameters.
-    "model_type": ("model.type", str, "cond_nmt", False, "The type of model to train:"
+    "model.type": (str, "cond_nmt", False, "The type of model to train:"
                                            " cond_nmt|aevnmt", 1),
-    "prior": ("prior.type", str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)", 1),
-    "prior_params": ("prior.params", ListOfFloats, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
+    "prior.type": (str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)", 1),
+    "prior.params": (str, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
         "beta (a: default 0.5, b: default 0.5), "
         "mog (num_components: default 10, radius: default 10, scale: default 0.5)", 2),
-    "latent_size": ("latent.size", int, 32, False, "The size of the latent variables.", 1),
-    "emb_size": ("emb.size", int, 32, False, "The source / target embedding size, this is also"
+    "latent.size": (int, 32, False, "The size of the latent variables.", 1),
+    "latent.sizes": (str, "", False, "Use this to specify latent_size for each prior should you have multiple priors. Example '64;12' ", 1),
+    "emb.size": (int, 32, False, "The source / target embedding size, this is also"
                                  " the model size in the transformer architecture.", 1),
-    "emb_init_scale": ("emb.init_scale", float, 0.01, False, "Scale of the Gaussian that is used to"
+    "emb.init_scale": (float, 0.01, False, "Scale of the Gaussian that is used to"
                                            " initialize the embeddings.", 1),
-    "hidden_size": ("hidden.size", int, 32, False, "The size of the hidden layers.", 1),
-    "tied_embeddings": ("emb.tied", bool, False, False, "Tie the embedding matrix with the output"
+    "hidden.size": (int, 32, False, "The size of the hidden layers.", 1),
+    "emb.tied": (bool, False, False, "Tie the embedding matrix with the output"
                                             " projection.", 1),
     "max_pooling_states":(bool, False, False, "Max-pool encoder states in the inference network instead of averaging them", 1),
     "feed_z":(bool, False, False, "Concatenate z to the previous word embeddings at each timestep", 1),
 
-    "encoder_style": ("enc.style", str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
-    "decoder_style": ("dec.style", str, "luong", False, "Decoder style: luong|bahdanau", 1),
-    "num_enc_layers": ("enc.num_layers", int, 1, False, "The number of encoder layers.", 1),
-    "num_dec_layers": ("dec.num_layers", int, 1, False, "The number of decoder layers.", 1),
+    "enc.style": (str, "rnn", False, "The type of encoder architecture: rnn|transformer", 1),
+    "dec.style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
+    "enc.num_layers": (int, 1, False, "The number of encoder layers.", 1),
+    "dec.num_layers": (int, 1, False, "The number of decoder layers.", 1),
 }
 
 aux_args = {
-    "bow_loss":("aux.bow", bool, False, False, "Add SL bag-of-words term to the loss", 1),
-    "bow_loss_tl":("aux.bow_tl", bool, False, False, "Add TL bag-of-words term to the loss", 1),
-    "MADE_loss":("aux.MADE", bool, False, False, "Add SL MADE term to the loss", 1),
-    "MADE_loss_tl":("aux.MADE_tl", bool, False, False, "Add TL MADE term to the loss", 1),
-    "count_MADE_loss":("aux.count_MADE", bool, False, False, "Add SL count MADE term to the loss", 1),
-    "count_MADE_loss_tl":("aux.count_MADE_tl", bool, False, False, "Add TL count MADE term to the loss", 1),
-    "ibm1_loss":("aux.ibm1", bool, False, False, "Side loss based on IBM1-style likelihood p(y|x,z)", 1),
-    "shuffle_lm":("aux.shuffle_lm", bool, False, False, "z is also used to produce source sentences with a shuffled LM instead of a reverse LM", 1),
-    "shuffle_lm_tl":("aux.shuffle_lm_tl", bool, False, False, "z is also used to produce target sentences with a shuffled LM instead of a reverse LM", 1),
-    "shuffle_lm_keep_bpe":("aux.shuffle_lm_keep_bpe", bool, False, False, "Shuffle whole words instead of BPE fragments.", 1),
-    "mixture_likelihood":(bool, False, False, "Use a mixture of likelihoods", 1),
-    "mixture_likelihood_dir_prior":(float, 0., False, "Specify a symmetric Dirichlet prior over mixture weights (use 0 for uniform and deterministic weights).", 1)
+    "aux.bow":(bool, False, False, "Add SL bag-of-words term to the loss", 1),
+    "aux.bow_tl":(bool, False, False, "Add TL bag-of-words term to the loss", 1),
+    "aux.MADE":(bool, False, False, "Add SL MADE term to the loss", 1),
+    "aux.MADE_tl":(bool, False, False, "Add TL MADE term to the loss", 1),
+    "aux.count_MADE":(bool, False, False, "Add SL count MADE term to the loss", 1),
+    "aux.count_MADE_tl":(bool, False, False, "Add TL count MADE term to the loss", 1),
+    "aux.ibm1":(bool, False, False, "Side loss based on IBM1-style likelihood p(y|x,z)", 1),
+    "aux.shuffle_lm":(bool, False, False, "z is also used to produce source sentences with a shuffled LM instead of a reverse LM", 1),
+    "aux.shuffle_lm_tl":(bool, False, False, "z is also used to produce target sentences with a shuffled LM instead of a reverse LM", 1),
+    "aux.shuffle_lm_keep_bpe":(bool, False, False, "Shuffle whole words instead of BPE fragments.", 1),
+    "likelihood.mixture":(bool, False, False, "Use a mixture of likelihoods", 1),
+    "likelihood.mixture_dir_prior":(float, 0., False, "Specify a symmetric Dirichlet prior over mixture weights (use 0 for uniform and deterministic weights).", 1)
 }
 
 transformer_args = {
-    "transformer_heads": ("transformer.heads", int, 8, False, "The number of transformer heads in that architecture", 1),
-    "transformer_hidden": ("transformer.hidden", int, 2048, False, "The size of the hidden feedforward layer in the transformer", 1)
+    "transformer.heads": (int, 8, False, "The number of transformer heads in that architecture", 1),
+    "transformer.hidden": (int, 2048, False, "The size of the hidden feedforward layer in the transformer", 1)
 }
 
 rnn_args = {
@@ -82,30 +83,34 @@ rnn_args = {
 
 inf_args = {
     # Inference model hyperparameters
-    "posterior": ("posterior.type", str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 2),
-    "inf_encoder_style": ("inf.encoder_style", str, "rnn", False, "The type of architecture: rnn|nli", 2),
-    "inf_conditioning": ("inf.conditioning", str, "x", False, "Conditioning context for q(z): x|xy", 2)
+    "posterior.type": (str, "gaussian", False, "Choose the family of the posterior approximation (gaussian, kumaraswamy)", 2),
+    "inf.encoder_style": (str, "rnn", False, "The type of architecture: rnn|nli", 2),
+    "inf.conditioning": (str, "x", False, "Conditioning context for q(z): x|xy", 2),
+    "inf.share_embeddings": (bool, False, False, "Should the inference model borrow embeddings from generative model?", 2),
+    "inf3": (str, "", False, "Specify encoders for three different inference models, namely, q(z|x), q(z|y) and q(z|x,y), e.g. rnn,rnn,nli or rnn,rnn,comb. The special type 'comb' uses the other two encoders to make an encoding of the pair.", 2),  
+    "inf3_comb_composition": (str, "cat", False, "Composition function used to combined encodings for q(z|x,y) if --inf3 is set", 2),
+
 }
 
 dec_args = {
     # Decoding hyperparameters.
-    "max_decoding_length": ("dec.max_length", int, 50, False, "Maximum decoding length", 3),
+    "dec.max_length": (int, 50, False, "Maximum decoding length", 3),
     "beam_width": ("beam_width", int, 1, False, "Beam search beam width, if 1 this becomes simple"
                                   " greedy decoding", 3),
-    "length_penalty_factor": ("length_penalty_factor", float, 1.0, False, "Length penalty factor (alpha) for"
+    "length_penalty_factor": (float, 1.0, False, "Length penalty factor (alpha) for"
                                                  " beam search decoding.", 3),
-    "sample_decoding": ("dec.sample", bool, False, False, "When decoding, sample instead of searching for the translation with maximum probability.", 3),
+    "dec.sample": (bool, False, False, "When decoding, sample instead of searching for the translation with maximum probability.", 3),
 }
 
 opt_args = {
     # Optimization hyperparameters
-    "gen_optimizer": ("gen.opt", str, "adam", False, "Optimizer for generative parameters (options: adam, amsgrad, adadelta, sgd)", 4),
-    "gen_lr": ("gen.lr", float, 1e-3, False, "The learning rate for gen_optimizer.", 4),
-    "gen_l2_weight": ("gen.l2_weight", float, 0., False, "Strength of L2 regulariser for generative parameters", 4),
+    "gen.opt": (str, "adam", False, "Optimizer for generative parameters (options: adam, amsgrad, adadelta, sgd)", 4),
+    "gen.lr": (float, 1e-3, False, "The learning rate for gen_optimizer.", 4),
+    "gen.l2_weight": (float, 0., False, "Strength of L2 regulariser for generative parameters", 4),
 
-    "inf_z_optimizer": ("inf.opt", str, "adam", False, "Optimizer for inference parameters wrt z (options: adam, amsgrad, adadelta, sgd)", 4),
-    "inf_z_lr": ("inf.lr", float, 1e-3, False, "The learning rate for inf_z_optimizer.", 4),
-    "inf_z_l2_weight": ("inf.l2_weight", float, 0., False, "Strength of L2 regulariser for inference parameters wrt z", 4),
+    "inf.opt": (str, "adam", False, "Optimizer for inference parameters wrt z (options: adam, amsgrad, adadelta, sgd)", 4),
+    "inf.lr": (float, 1e-3, False, "The learning rate for inf_z_optimizer.", 4),
+    "inf.l2_weight": (float, 0., False, "Strength of L2 regulariser for inference parameters wrt z", 4),
 
     "num_epochs": (int, 1, False, "The number of epochs to train the model for.", 4),
     "batch_size": (int, 64, False, "The batch size.", 4),
@@ -113,22 +118,22 @@ opt_args = {
     "max_gradient_norm": (float, 5.0, False, "The maximum gradient norm to clip the"
                                              " gradients to, to disable"
                                              " set <= 0.", 4),
-    "lr_scheduler": ("lr.scheduler", str, "reduce_on_plateau", False, "The learning rate scheduler used: reduce_on_plateau |"
+    "lr.scheduler": (str, "reduce_on_plateau", False, "The learning rate scheduler used: reduce_on_plateau |"
                                                       " noam (transformers)", 4),
-    "lr_reduce_factor": ("lr.reduce_factor", float, 0.5, False, "The factor to reduce the learning rate"
+    "lr.reduce_factor": (float, 0.5, False, "The factor to reduce the learning rate"
                                             " with if no validation improvement is"
                                             "  found (all lr schedulers).", 4),
-    "lr_reduce_patience": ("lr.reduce_patience", int, 2, False, "The number of evaluations to wait for"
+    "lr.reduce_patience": (int, 2, False, "The number of evaluations to wait for"
                                            " improvement of validation scores"
                                            " before reducing the learning rate"
                                            " (reduce_on_plateau scheduler).", 4),
-    "lr_reduce_cooldown": ("lr.reduce_cooldown", int, 2, False, "The number of evaluations to wait with"
+    "lr.reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
                                           " checking for improvements after a"
                                           " learning rate reduction"
                                           " (reduce_on_plateau scheduler).", 4),
-    "min_lr": ("lr.min", float, 1e-5, False, "The minimum learning rate the learning rate"
+    "lr.min": (float, 1e-5, False, "The minimum learning rate the learning rate"
                                    " scheduler can reduce to (reduce_on_plateau scheduler).", 4),
-    "lr_warmup": ("lr.warmup", int, 4000, False, "Learning rate warmup (noam_scheduler)", 4),
+    "lr.warmup": (int, 4000, False, "Learning rate warmup (noam_scheduler)", 4),
     "patience": (int, 5, False, "The number of evaluations to continue training for"
                                 " when an improvement has been found.", 4),
     "dropout": (float, 0., False, "The amount of dropout.", 4),
@@ -136,36 +141,35 @@ opt_args = {
     "evaluate_every": (int, -1, False, "The number of batches after which to run"
                                        " evaluation. If <= 0, evaluation will happen"
                                        " after every epoch.", 4),
-    "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')", 4),
+    "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')", 4)
 }
 
 kl_args = {
-    "KL_free_nats": ("kl.free_nats", float, 0., False, "KL = min(KL_free_nats, KL)", 4),
-    "KL_annealing_steps": ("kl.annealing_steps", int, 0, False, "Amount of KL annealing steps (0...1)", 4),
-    "minimum_desired_rate": ("kl.mdr", float, -1., False, "If positive adds a soft Lagrangian constraint for the KL term to"
+    "kl.free_nats": (float, 0., False, "KL = min(KL_free_nats, KL)", 4),
+    "kl.annealing_steps": (int, 0, False, "Amount of KL annealing steps (0...1)", 4),
+    "kl.mdr": (float, -1., False, "If positive adds a soft Lagrangian constraint for the KL term to"
                                                 " minimally achieve the given value.", 4),
 }
 
 translation_args = {
     # Translation hyperparameters.
-    "translation_input_file": ("translation.input_file", str, None, False, "The translation input file,"
+    "translation.input_file": (str, None, False, "The translation input file,"
                                                " ignored for training.", 5),
-    "translation_output_file": ("translation.output_file", str, None, False, "The translation output file,"
+    "translation.output_file": (str, None, False, "The translation output file,"
                                                 " ignored for training.", 5),
-    "translation_ref_file": ("translation.ref_file", str, None, False, "The translation references file", 5),
+    "translation.ref_file": (str, None, False, "The translation references file", 5),
     "verbose": (bool, False, False, "Print logging information", 5),
     "show_raw_output": (bool, False, False, "Prints raw output (tokenized, truecased, BPE-segmented, max-len splitting) to stderr", 5),
-    "interactive_translation": ("translation.interactive", int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout", 5),
+    "translation.interactive": (int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout", 5),
     "split_sentences": (bool, False, False, "Pass the whole input through a sentence splitter (mosestokenizer.MosesSentenceSplitter)", 5),
     "tokenize": (bool, False, False, "Tokenize input (with sacremoses.MosesTokenizer)", 5),
     "detokenize": (bool, False, False, "Detokenize output (with sacremoses.MosesDetokenizer)", 5),
     "lowercase": (bool, False, False, "Lowercase the input", 5),
     "recase": (bool, False, False, "Recase the output (with sacremoses.Detruecaser)", 5),
     "truecaser_prefix": (str, None, False, "Truecase and de-truecases using a trained model (with sacremoses.MosesTruecaser) -- slow to load", 5),
-    "bpe_codes_prefix": ("bpe.codes_prefix", str, None, False, "Enable BPE-segmentation by providing a prefix to BPE codes (AEVNMT.pt will add .src and .tgt)", 5),
-    "bpe_merge": ("bpe.merge", bool, True, False, "Merge subwords via regex", 5),
+    "bpe.codes_prefix": (str, None, False, "Enable BPE-segmentation by providing a prefix to BPE codes (AEVNMT.pt will add .src and .tgt)", 5),
+    "bpe.merge": (bool, True, False, "Merge subwords via regex", 5),
     "postprocess_ref": (bool, False, False, "Applies post-processing steps to reference (if provided)", 5),
-
     "draw_translations": (int, 0, False, "Greedy decode a number of posterior samples", 5),
 }
 
@@ -182,6 +186,4 @@ arg_groups = {
     "Translation": translation_args
 }
 
-args = {
-    k: v for group in arg_groups.values() for k, v in group.items()
-}
+all_args = {k: v for group in arg_groups.values() for k, v in group.items()}
