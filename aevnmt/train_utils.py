@@ -63,100 +63,100 @@ def load_vocabularies(hparams):
     val_tgt = f"{hparams.validation_prefix}.{hparams.tgt}"
 
     # Construct the vocabularies.
-    if hparams.vocab_prefix is not None:
+    if hparams.vocab.prefix is not None:
 
-        if hparams.share_vocab:
-            vocab = Vocabulary.from_file(hparams.vocab_prefix, max_size=hparams.max_vocab_size)
+        if hparams.vocab.shared:
+            vocab = Vocabulary.from_file(hparams.vocab.prefix, max_size=hparams.vocab.max_size)
             vocab_src = vocab
             vocab_tgt = vocab
         else:
-            vocab_src_file = f"{hparams.vocab_prefix}.{hparams.src}"
-            vocab_tgt_file = f"{hparams.vocab_prefix}.{hparams.tgt}"
-            vocab_src = Vocabulary.from_file(vocab_src_file, max_size=hparams.max_vocab_size)
-            vocab_tgt = Vocabulary.from_file(vocab_tgt_file, max_size=hparams.max_vocab_size)
+            vocab_src_file = f"{hparams.vocab.prefix}.{hparams.src}"
+            vocab_tgt_file = f"{hparams.vocab.prefix}.{hparams.tgt}"
+            vocab_src = Vocabulary.from_file(vocab_src_file, max_size=hparams.vocab.max_size)
+            vocab_tgt = Vocabulary.from_file(vocab_tgt_file, max_size=hparams.vocab.max_size)
     else:
 
-        if hparams.share_vocab:
+        if hparams.vocab.shared:
             all_files = [train_src, val_src, train_tgt, val_tgt]
             if hparams.mono_src:
                 all_files.append(hparams.mono_src)
             if hparams.mono_tgt:
                 all_files.append(hparams.mono_tgt)
             vocab = Vocabulary.from_data(all_files,
-                                         min_freq=hparams.vocab_min_freq, max_size=hparams.max_vocab_size)
+                                         min_freq=hparams.vocab.min_freq, max_size=hparams.vocab.max_size)
             vocab_src = vocab
             vocab_tgt = vocab
         else:
             src_files = [train_src, val_src]
             if hparams.mono_src:
                 src_files.append(hparams.mono_src)
-            vocab_src = Vocabulary.from_data(src_files, min_freq=hparams.vocab_min_freq,
-                                             max_size=hparams.max_vocab_size)
+            vocab_src = Vocabulary.from_data(src_files, min_freq=hparams.vocab.min_freq,
+                                             max_size=hparams.vocab.max_size)
             tgt_files = [train_tgt, val_tgt]
             if hparams.mono_tgt:
                 tgt_files.append(hparams.mono_tgt)
-            vocab_tgt = Vocabulary.from_data(tgt_files, min_freq=hparams.vocab_min_freq,
-                                             max_size=hparams.max_vocab_size)
+            vocab_tgt = Vocabulary.from_data(tgt_files, min_freq=hparams.vocab.min_freq,
+                                             max_size=hparams.vocab.max_size)
 
     return vocab_src, vocab_tgt
 
 def create_encoder(hparams):
-    if hparams.encoder_style == "rnn":
-        return RNNEncoder(emb_size=hparams.emb_size,
-                             hidden_size=hparams.hidden_size,
+    if hparams.enc.style == "rnn":
+        return RNNEncoder(emb_size=hparams.emb.size,
+                             hidden_size=hparams.hidden.size,
                              bidirectional=hparams.bidirectional,
                              dropout=hparams.dropout,
-                             num_layers=hparams.num_enc_layers,
+                             num_layers=hparams.enc.num_layers,
                              cell_type=hparams.cell_type)
-    elif hparams.encoder_style == "transformer":
-        return TransformerEncoder(input_size=hparams.emb_size,
-                                     num_heads=hparams.transformer_heads,
-                                     num_layers=hparams.num_enc_layers,
-                                     dim_ff=hparams.transformer_hidden,
+    elif hparams.enc.style == "transformer":
+        return TransformerEncoder(input_size=hparams.emb.size,
+                                     num_heads=hparams.transformer.heads,
+                                     num_layers=hparams.enc.num_layers,
+                                     dim_ff=hparams.transformer.hidden,
                                      dropout=hparams.dropout)
     else:
-        raise Exception(f"Unknown encoder style: {hparams.encoder_style}")
+        raise Exception(f"Unknown encoder style: {hparams.enc.style}")
 
 def create_decoder(attention, hparams):
-    init_from_encoder_final = (hparams.model_type == "cond_nmt")
-    if hparams.decoder_style == "bahdanau":
-        return BahdanauDecoder(emb_size=hparams.emb_size,
-                               hidden_size=hparams.hidden_size,
+    init_from_encoder_final = (hparams.model.type == "cond_nmt")
+    if hparams.dec.style == "bahdanau":
+        return BahdanauDecoder(emb_size=hparams.emb.size,
+                               hidden_size=hparams.hidden.size,
                                attention=attention,
                                dropout=hparams.dropout,
-                               num_layers=hparams.num_dec_layers,
+                               num_layers=hparams.dec.num_layers,
                                cell_type=hparams.cell_type,
                                init_from_encoder_final=init_from_encoder_final,
-                               feed_z_size=hparams.latent_size if hparams.feed_z else 0)
-    elif hparams.decoder_style == "luong":
-        return LuongDecoder(emb_size=hparams.emb_size,
-                            hidden_size=hparams.hidden_size,
+                               feed_z_size=hparams.latent.size if hparams.feed_z else 0)
+    elif hparams.dec.style == "luong":
+        return LuongDecoder(emb_size=hparams.emb.size,
+                            hidden_size=hparams.hidden.size,
                             attention=attention,
                             dropout=hparams.dropout,
-                            num_layers=hparams.num_dec_layers,
+                            num_layers=hparams.dec.num_layers,
                             cell_type=hparams.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
-                            feed_z_size=hparams.latent_size if hparams.feed_z else 0)
+                            feed_z_size=hparams.latent.size if hparams.feed_z else 0)
     else:
-        raise Exception(f"Unknown decoder style: {hparams.decoder_style}")
+        raise Exception(f"Unknown decoder style: {hparams.dec.style}")
 
 def create_attention(hparams):
     if not hparams.attention in ["luong", "scaled_luong", "bahdanau"]:
         raise Exception(f"Unknown attention option: {hparams.attention}")
 
-    if hparams.encoder_style == "rnn":
-        key_size = hparams.hidden_size
+    if hparams.enc.style == "rnn":
+        key_size = hparams.hidden.size
         if hparams.bidirectional:
             key_size = key_size * 2
     else:
-        key_size = hparams.emb_size
-    query_size = hparams.hidden_size
+        key_size = hparams.emb.size
+    query_size = hparams.hidden.size
 
     if "luong" in hparams.attention:
         scale = True if hparams.attention == "scaled_luong" else False
-        attention = LuongAttention(key_size, hparams.hidden_size, scale=scale)
+        attention = LuongAttention(key_size, hparams.hidden.size, scale=scale)
     else:
-        attention = BahdanauAttention(key_size, query_size, hparams.hidden_size)
+        attention = BahdanauAttention(key_size, query_size, hparams.hidden.size)
 
     return attention
 

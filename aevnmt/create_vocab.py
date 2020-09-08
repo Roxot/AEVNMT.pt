@@ -14,7 +14,7 @@ def create_vocab():
 
     # Load the data and print some statistics.
     vocab_src, vocab_tgt = load_vocabularies(hparams)
-    if hparams.share_vocab:
+    if hparams.vocab.shared:
         print("\n==== Vocabulary")
         vocab_src.print_statistics()
     else:
@@ -31,7 +31,7 @@ def create_vocab():
     print(f"\nSaving vocabularies to {out_dir}...")
     vocab_src.save(out_dir / f"vocab.{hparams.src}")
     vocab_tgt.save(out_dir / f"vocab.{hparams.tgt}")
-    hparams.vocab_prefix = out_dir / "vocab"
+    hparams.vocab.prefix = out_dir / "vocab"
 
 if __name__ == "__main__":
     create_vocab()
