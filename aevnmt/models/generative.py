@@ -684,7 +684,7 @@ class TransformerTM(GenerativeTM):
         self.dropout_layer = nn.Dropout(p=dropout)
 
         # For future experiments, different methods of adding z into the transformer.
-        assert feed_z_method in ['first'], "Unknown feed_z_method: {}".format(feed_z_method)
+        assert feed_z_method in ['first', 'none'], "Unknown feed_z_method: {}".format(feed_z_method)
         self.feed_z_method = feed_z_method
 
         self.fc_z_enc = nn.Linear(latent_size, src_embedder.embedding_dim)
@@ -695,11 +695,13 @@ class TransformerTM(GenerativeTM):
         embed y, and add z to inputs according to self.feed_z_method.
         """
         y_emb = self.tgt_embedder(y) # [B, T, D]
-        z_dec = self.fc_z_dec(z) # [B, D]
 
         if self.feed_z_method == "first":
             # Add z as first decoder input, encoder outputs stay the same.
+            z_dec = self.fc_z_dec(z) # [B, D]
             y_emb = torch.cat([z_dec.unsqueeze(1), y_emb], 1) # [B, T+1, D]
+        elif self.feed_z_method == "none":
+            pass
         else:
             raise NotImplementedError()
 
@@ -710,17 +712,27 @@ class TransformerTM(GenerativeTM):
         embed x, and add z to inputs according to self.feed_z_method.
         """
         x_emb = self.src_embedder(x) # [B, T, D]
-        z_enc = self.fc_z_enc(z) # [B, D]
 
         if self.feed_z_method == "first":
             # Add z as first encoder input. to both encoder and decoder inputs.
+            z_enc = self.fc_z_enc(z) # [B, D]
             x_emb = torch.cat([z_enc.unsqueeze(1), x_emb], 1) # [B, T+1, D]
             # Sequences get 1 longer.
-            seq_len_x += 1
+            seq_len_x = seq_len_x.clone() + 1
+        elif self.feed_z_method == "none":
+            pass
         else:
             raise NotImplementedError()
 
         return x_emb, seq_len_x
+
+    def encode(self, x, seq_len_x, z):
+        x_emb, seq_len_x = self.prepare_encoder_input(x, seq_len_x, z)
+        encoder_out, _ = self.encoder(x_emb, seq_len_x)
+        return encoder_out, seq_len_x
+
+    def generate(self, pre_output):
+        return F.linear(pre_output, self.output_matrix)
 
     def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Distribution:
         x_emb, seq_len_x = self.prepare_encoder_input(x, seq_len_x, z)
@@ -728,7 +740,7 @@ class TransformerTM(GenerativeTM):
 
         y_emb, encoder_out, seq_len_x = self.prepare_decoder_input(y, encoder_out, seq_len_x, z)
         decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
-        logits = F.linear(decoder_out, self.output_matrix)
+        logits = self.generate(decoder_out)
 
         if self.feed_z_method == "first":
             # Omit first output, since first input is z instead of start token.
@@ -760,7 +772,7 @@ class TransformerTM(GenerativeTM):
         for _ in range(max_len):
             y_emb, encoder_out, seq_len_x = self.prepare_decoder_input(prev_y, encoder_out, seq_len_x, z)
             decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
-            logits = F.linear(decoder_out, self.output_matrix)
+            logits = self.generate(decoder_out)
             logit_t = logits[:, -1].unsqueeze(1) #[B, 1, |Y|]
             pyt_xz = Categorical(logits=logit_t)
             if greedy:

@@ -1,11 +1,3 @@
-import math
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-from torch.distributions import Distribution, Categorical
-
-
 """
 Implementation Notes
 
@@ -16,18 +8,28 @@ Implementation Notes
 - TODO feed_z_method for both the GenerativeLM and GenerativeTM needs testing. Options:
     - z is x_{0} (Current method, feed_z_method="first")
     - x_i -> [z, x_i]: where x_i is the embedding of the ith token in the history
-    - h_i -> [z, h_i]: where h_i can be the state just before the output layer, and/or the state of the ith token in the memory (attended to)
+    - h_i -> [z, h_i]: where h_i can be the state just before the output layer,
+        and/or the state of the ith token in the memory (attended to)
     - change concatenation to sum in the last two options.
 """
+
+import math
+
+import torch
+from torch import nn
 
 def generate_padding_mask(seq_len, max_len=None):
     """
     Generate padding mask for the Transformer Encoder or Decoder memory.
+
+    From the nn.Transformer:
+    If a BoolTensor is provided, the positions with the value of True
+    will be ignored while the position with the value of False will be unchanged.
     """
     if max_len is None:
-        max_len = seq_len.max()
+        max_len = seq_len.max().int()
     mask = torch.arange(max_len).to(seq_len.device)
-    mask = mask.expand(seq_len.size(0), max_len.int())
+    mask = mask.expand(seq_len.size(0), max_len)
     mask = (mask >= seq_len.unsqueeze(1))
     return mask
 
@@ -56,12 +58,12 @@ class TransformerEncoder(nn.Module):
                                                    nhead=num_heads,
                                                    dim_feedforward=hidden_size,
                                                    dropout=dropout)
-                                                   
+
         self.transformer_enc = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.input_size = input_size
 
     def forward(self, x_embed, seq_len=None):
-                
+
         # Transform x_embed from batch major to time major.
         x_embed = x_embed.permute(1, 0, 2) # [T_x, B, input_size]
         x_embed = x_embed * math.sqrt(self.input_size)
@@ -69,10 +71,10 @@ class TransformerEncoder(nn.Module):
 
         # Create a sequence mask.
         if seq_len is not None:
-            src_mask = generate_padding_mask(seq_len)
+            src_mask = generate_padding_mask(seq_len, max_len=x_embed.size(0))
         else:
             src_mask = None
-   
+
         # Run the transformer encoder.
         x_enc = self.transformer_enc(x_embed, src_key_padding_mask=src_mask) # [T_x, B, input_size]
         # Return in batch major.
@@ -99,15 +101,14 @@ class TransformerDecoder(nn.Module):
         y_embed = y_embed.permute(1, 0, 2)
         y_embed = y_embed * math.sqrt(self.input_size)
         y_embed = self.pos_enc(y_embed)
-        
+
         mem = mem.permute(1, 0, 2)
 
         # Make padding masks and causal mask.
-        mem_pad_mask = generate_padding_mask(mem_len)
+        mem_pad_mask = generate_padding_mask(mem_len, max_len=mem.size(0))
         causal_mask = generate_square_subsequent_mask(y_embed.size(0))
-
         out = self.transformer_dec(tgt=y_embed, memory=mem,
-                                   tgt_mask=causal_mask, 
+                                   tgt_mask=causal_mask,
                                    memory_key_padding_mask=mem_pad_mask)
 
         return out.permute(1, 0, 2)
@@ -166,10 +167,10 @@ class TransformerCompositionFunction(nn.Module):
 
     def forward(self, x_embed, x_len, y_embed, y_len):
         x_embed = x_embed.permute(1, 0, 2)
-        x_pad_mask = generate_padding_mask(x_len)
+        x_pad_mask = generate_padding_mask(x_len, max_len=x_embed.size(0))
 
         y_embed = y_embed.permute(1, 0, 2)
-        y_pad_mask = generate_padding_mask(y_len)
+        y_pad_mask = generate_padding_mask(y_len, max_len=y_embed.size(0))
 
         out = self.transformer(tgt=x_embed, tgt_key_padding_mask=x_pad_mask,
                                memory=y_embed, memory_key_padding_mask=y_pad_mask)
