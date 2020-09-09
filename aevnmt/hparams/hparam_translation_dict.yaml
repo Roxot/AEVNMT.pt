@@ -1,4 +1,4 @@
-# Flag to indicate if the codebase is already translated to nested hparams
+# This file contains the translation between the old argparser and nested argparser.
 KL_annealing_steps: kl.annealing_steps
 KL_free_nats: kl.free_nats
 MADE_loss: aux.MADE

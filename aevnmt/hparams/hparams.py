@@ -1,6 +1,6 @@
 import jsonargparse
 from jsonargparse import ArgumentParser, ActionConfigFile
-from .utils import rgetattr, rsetattr, str_to_bool
+from .utils import str_to_bool
 from .args import arg_groups
 
 
@@ -48,7 +48,7 @@ class Hyperparameters:
 
 def make_grouped_parser(arg_groups, check_required=True):
     """
-    Builds a grouped argument parser.
+    Builds an argument parser, with args divided over groups.
 
     :param arg_groups: a dict of dicts {group_name: args}. See ./args for format.
     :param check_required: Check for required arguments, defaults to True
@@ -64,8 +64,6 @@ def make_grouped_parser(arg_groups, check_required=True):
 def add_arg_group(parser, group_name, arg_group, check_required=True):
     group = parser.add_argument_group(group_name)
     for arg_name, arg_val in arg_group.items():
-        if len(arg_val) == 6:
-            arg_val = arg_val[1:] #TODO fix args.py and remove
         arg_type, default, required, description, _ = arg_val
         arg_type = str_to_bool if arg_type == bool else arg_type
         required = required if check_required else False

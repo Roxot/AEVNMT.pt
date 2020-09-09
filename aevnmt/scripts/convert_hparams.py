@@ -1,8 +1,10 @@
 import re
+import glob
+from pathlib import Path
 import yaml, json
+
 from aevnmt.hparams.args import all_args
 from aevnmt.hparams import Hyperparameters
-import glob
 
 
 def search_prefixes():
@@ -62,6 +64,16 @@ def get_replace_files():
     return filenames
 
 def replace_all():
+    """
+    Output of conversion:
+    ../aevnmt_helper.py -- 91 changes
+    ../translate.py -- 17 changes
+    ../train_utils.py -- 43 changes
+    ../train.py -- 10 changes
+    ../create_vocab.py -- 2 changes
+    ../opt_utils.py -- 18 changes
+    ../nmt_helper.py -- 6 changes
+    """
     with open('../hparams/hparam_translation_dict.yaml', 'r') as f:
         translation_dict = yaml.load(f)
 
@@ -72,7 +84,6 @@ def replace_all():
 def replace_single(fn):
     with open('../hparams/hparam_translation_dict.yaml', 'r') as f:
         translation_dict = yaml.load(f)
-    print(translation_dict['model_checkpoint'])
     replace_in_file(fn, translation_dict)
 
 def convert_config(fn, translation_dict):
@@ -86,14 +97,14 @@ def convert_config(fn, translation_dict):
         else:
             correct_config = False
     if not correct_config:
-        print(f'{fn} has outdated config')
+        print(f'{fn} contains an incorrect config, and is not converted.')
         return
 
     parser = Hyperparameters(check_required=False)._parser
     new_cfg = parser.parse_object(new_cfg)
     
-    new_fn = fn.replace('.json', '.yaml')
-    parser.save(new_cfg, new_fn, format='yaml', overwrite=True)
+    new_fn = Path(fn).with_suffix('.yaml')
+    parser.save(new_cfg, str(new_fn), format='yaml', overwrite=True)
 
 def convert_demo_configs():
     with open('../hparams/hparam_translation_dict.yaml', 'r') as f:
@@ -101,19 +112,7 @@ def convert_demo_configs():
 
     filenames = glob.glob('../../demo/hparams/*.json')
     for fn in filenames:
-        convert_config(fn, translation_dict) 
+        convert_config(fn, translation_dict)
 
 if __name__ == "__main__":
-    # replace_all()
     convert_demo_configs()
-
-    """
-    ../aevnmt_helper.py -- 91 changes
-    ../translate.py -- 17 changes
-    ../train_utils.py -- 43 changes
-    ../train.py -- 10 changes
-    ../create_vocab.py -- 2 changes
-    ../opt_utils.py -- 18 changes
-    ../nmt_helper.py -- 6 changes
-    """
-    

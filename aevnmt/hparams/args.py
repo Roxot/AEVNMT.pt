@@ -95,7 +95,7 @@ inf_args = {
 dec_args = {
     # Decoding hyperparameters.
     "dec.max_length": (int, 50, False, "Maximum decoding length", 3),
-    "beam_width": ("beam_width", int, 1, False, "Beam search beam width, if 1 this becomes simple"
+    "beam_width": (int, 1, False, "Beam search beam width, if 1 this becomes simple"
                                   " greedy decoding", 3),
     "length_penalty_factor": (float, 1.0, False, "Length penalty factor (alpha) for"
                                                  " beam search decoding.", 3),

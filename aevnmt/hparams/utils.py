@@ -35,22 +35,3 @@ def str_to_bool(v):
     if v.lower() in ('no', 'false', 'f', 'n', '0'):
         return False
     raise ArgumentTypeError('Boolean value expected.')
-
-
-def rsetattr(obj, attr, val):
-    """
-    setattr for nested attributes. 
-    Source: https://stackoverflow.com/questions/31174295/getattr-and-setattr-on-nested-subobjects-chained-properties
-    """
-    pre, _, post = attr.rpartition('.')
-    return setattr(rgetattr(obj, pre) if pre else obj, post, val)
-
-
-def rgetattr(obj, attr, *args):
-    """
-    getattr for nested attributes.
-    Source: https://stackoverflow.com/questions/31174295/getattr-and-setattr-on-nested-subobjects-chained-properties
-    """
-    def _getattr(obj, attr):
-        return getattr(obj, attr, *args)
-    return functools.reduce(_getattr, [obj] + attr.split('.'))
