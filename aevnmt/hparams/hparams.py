@@ -54,7 +54,7 @@ def make_grouped_parser(arg_groups, check_required=True):
     :param check_required: Check for required arguments, defaults to True
     :return: argument parser containing the args from arg_groups.
     """
-    parser = ArgumentParser()
+    parser = ArgumentParser(formatter_class='default_argparse')
     parser.add_argument('--hparams_file', action=ActionConfigFile)
     for group_name, arg_group in arg_groups.items():
         add_arg_group(parser, group_name, arg_group, check_required=check_required)
