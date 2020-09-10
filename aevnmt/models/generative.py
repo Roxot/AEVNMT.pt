@@ -806,7 +806,7 @@ class TransformerLM(GenerativeLM):
         self.sos_idx = sos_idx
         self.eos_idx = eos_idx
         self.transformer = TransformerEncoder(
-            embedder.embedding_dim, hidden_size, num_heads, num_layers, dropout
+            embedder.embedding_dim, hidden_size, num_heads, num_layers, dropout, autoregressive=True
         )
         self.tied_embeddings = tied_embeddings
         if not self.tied_embeddings:
@@ -833,6 +833,8 @@ class TransformerLM(GenerativeLM):
         if self.feed_z_method == "first":
             # Add z as first input to transformer.
             x_emb = torch.cat([z_emb.unsqueeze(1), x_emb], 1) # [B, T+1, D]
+        elif self.feed_z_method == "none":
+            pass
         else:
             raise NotImplementedError()
 

@@ -51,7 +51,17 @@ class TransformerEncoder(nn.Module):
     An extremely simple wrapper around nn.TransformerEncoder that works in batch major.
     """
 
-    def __init__(self, input_size, hidden_size, num_heads, num_layers, dropout=0.):
+    def __init__(self, input_size, hidden_size, num_heads, num_layers, dropout=0., autoregressive=False):
+        """
+        [summary]
+
+        :param input_size: transformer d_model.
+        :param hidden_size: transformer feedforward size.
+        :param num_heads: number of attention heads.
+        :param num_layers: number of layers.
+        :param dropout: dropout chance, defaults to 0.
+        :param autoregressive: If True the attention is masked like a transformer decoder, defaults to False
+        """
         super().__init__()
         self.pos_enc = PositionalEncoding(input_size, dropout)
         encoder_layer = nn.TransformerEncoderLayer(d_model=input_size,
@@ -61,6 +71,7 @@ class TransformerEncoder(nn.Module):
 
         self.transformer_enc = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.input_size = input_size
+        self.autoregressive = autoregressive
 
     def forward(self, x_embed, seq_len=None):
 
@@ -71,12 +82,19 @@ class TransformerEncoder(nn.Module):
 
         # Create a sequence mask.
         if seq_len is not None:
-            src_mask = generate_padding_mask(seq_len, max_len=x_embed.size(0))
+            pad_mask = generate_padding_mask(seq_len, max_len=x_embed.size(0))
         else:
-            src_mask = None
+            pad_mask = None
+
+        if self.autoregressive:
+            attn_mask = generate_square_subsequent_mask(x_embed.size(0))
+        else:
+            attn_mask = None
+
 
         # Run the transformer encoder.
-        x_enc = self.transformer_enc(x_embed, src_key_padding_mask=src_mask) # [T_x, B, input_size]
+        x_enc = self.transformer_enc(x_embed, mask=attn_mask, src_key_padding_mask=pad_mask) # [T_x, B, input_size]
+        
         # Return in batch major.
         x_enc = x_enc.permute(1, 0, 2) # [B, T_x, input_size]
         x_first = x_enc[:, 0, :]
