@@ -1,6 +1,8 @@
 """
 Adapted from: https://github.com/joeynmt/joeynmt/blob/master/joeynmt/search.py
 """
+from packaging import version
+
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -84,7 +86,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
             device=encoder_outputs.device)
 
         # Give full probability to the first beam on the first step.
-        topk_log_probs = (torch.Tensor([0.0] + [float("-inf")] * (beam_width - 1),
+        topk_log_probs = (torch.tensor([0.0] + [float("-inf")] * (beam_width - 1),
                                        device=encoder_outputs.device).repeat(
                                         batch_size))
 
@@ -127,7 +129,10 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
                 topk_log_probs = topk_scores * length_penalty
 
             # reconstruct beam origin and true word ids from flattened order
-            topk_beam_index = topk_ids.div(tgt_vocab_size)
+            if version.parse(torch.__version__) >= version.parse('1.3.0'):
+                topk_beam_index = topk_ids.floor_divide(tgt_vocab_size)
+            else:
+                topk_beam_index = topk_ids.div(tgt_vocab_size)
             topk_ids = topk_ids.fmod(tgt_vocab_size)
 
             # map beam_index to batch_index in the flat representation
@@ -155,7 +160,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
                     b = batch_offset[i]
                     if end_condition[i]:
                         is_finished[i].fill_(1)
-                    finished_hyp = is_finished[i].nonzero().view(-1)
+                    finished_hyp = is_finished[i].nonzero(as_tuple=False).view(-1)
                     # store finished hypotheses for this batch
                     for j in finished_hyp:
                         hypotheses[b].append((
@@ -171,7 +176,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
                                 break
                             results["scores"][b].append(score)
                             results["predictions"][b].append(pred)
-                non_finished = end_condition.eq(0).nonzero().view(-1)
+                non_finished = end_condition.eq(0).nonzero(as_tuple=False).view(-1)
 
                 # if all sentences are translated, no need to go further
                 if len(non_finished) == 0:
@@ -270,7 +275,7 @@ def beam_search_transformer(
             device=encoder_outputs.device)
 
         # Give full probability to the first beam on the first step.
-        topk_log_probs = (torch.Tensor([0.0] + [float("-inf")] * (beam_width - 1),
+        topk_log_probs = (torch.tensor([0.0] + [float("-inf")] * (beam_width - 1),
                                        device=encoder_outputs.device).repeat(
                                        batch_size))
 
@@ -314,7 +319,10 @@ def beam_search_transformer(
                 topk_log_probs = topk_scores * length_penalty
 
             # reconstruct beam origin and true word ids from flattened order
-            topk_beam_index = topk_ids.div(tgt_vocab_size)
+            if version.parse(torch.__version__) >= version.parse('1.3.0'):
+                topk_beam_index = topk_ids.floor_divide(tgt_vocab_size)
+            else:
+                topk_beam_index = topk_ids.div(tgt_vocab_size)
             topk_ids = topk_ids.fmod(tgt_vocab_size)
 
             # map beam_index to batch_index in the flat representation
@@ -342,7 +350,7 @@ def beam_search_transformer(
                     b = batch_offset[i]
                     if end_condition[i]:
                         is_finished[i].fill_(1)
-                    finished_hyp = is_finished[i].nonzero().view(-1)
+                    finished_hyp = is_finished[i].nonzero(as_tuple=False).view(-1)
                     # store finished hypotheses for this batch
                     for j in finished_hyp:
                         hypotheses[b].append((
@@ -358,7 +366,7 @@ def beam_search_transformer(
                                 break
                             results["scores"][b].append(score)
                             results["predictions"][b].append(pred)
-                non_finished = end_condition.eq(0).nonzero().view(-1)
+                non_finished = end_condition.eq(0).nonzero(as_tuple=False).view(-1)
 
                 # if all sentences are translated, no need to go further
                 if len(non_finished) == 0:
