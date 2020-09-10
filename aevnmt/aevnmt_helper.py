@@ -45,62 +45,62 @@ def _draw_translations(model, val_dl, vocab_src, vocab_tgt, device, hparams):
 
 def create_aux_language_models(vocab_src, src_embedder, hparams) -> Dict[str, GenerativeLM]:
     lms = dict()
-    if hparams.bow_loss:
+    if hparams.aux.bow:
         lms['bow'] = IndependentLM(
-            latent_size=hparams.latent_size, 
+            latent_size=hparams.latent.size, 
             embedder=src_embedder,
             tied_embeddings=False)
-    if hparams.MADE_loss:
+    if hparams.aux.MADE:
         lms['made'] = CorrelatedBernoullisLM(
             vocab_size=src_embedder.num_embeddings, 
-            latent_size=hparams.latent_size, 
-            hidden_sizes=[hparams.hidden_size, hparams.hidden_size],  # TODO: generalise
+            latent_size=hparams.latent.size, 
+            hidden_sizes=[hparams.hidden.size, hparams.hidden.size],  # TODO: generalise
             pad_idx=src_embedder.padding_idx, 
             num_masks=1,  
             resample_mask_every=0)  
-    if hparams.count_MADE_loss:
+    if hparams.aux.count_MADE:
         lms['count_made'] = CorrelatedPoissonsLM(
             vocab_size=src_embedder.num_embeddings, 
-            latent_size=hparams.latent_size, 
-            hidden_sizes=[hparams.hidden_size, hparams.hidden_size],  # TODO: generalise
+            latent_size=hparams.latent.size, 
+            hidden_sizes=[hparams.hidden.size, hparams.hidden.size],  # TODO: generalise
             pad_idx=src_embedder.padding_idx, 
             num_masks=1,  
             resample_mask_every=0)  
-    if hparams.shuffle_lm:  
+    if hparams.aux.shuffle_lm:  
         raise NotImplementedError("This is not yet supported")
     return lms
 
 
 def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[str, GenerativeTM]:
     tms = dict()
-    if hparams.bow_loss_tl:
+    if hparams.aux.bow_tl:
         tms['bow'] = IndependentTM(
-            latent_size=hparams.latent_size,
+            latent_size=hparams.latent.size,
             embedder=tgt_embedder,
-            tied_embeddings=hparams.tied_embeddings)  
-    if hparams.MADE_loss_tl:
+            tied_embeddings=hparams.emb.tied)  
+    if hparams.aux.MADE_tl:
         tms['made'] = CorrelatedBernoullisTM(
             vocab_size=tgt_embedder.num_embeddings, 
-            latent_size=hparams.latent_size, 
-            hidden_sizes=[hparams.hidden_size, hparams.hidden_size], 
+            latent_size=hparams.latent.size, 
+            hidden_sizes=[hparams.hidden.size, hparams.hidden.size], 
             pad_idx=tgt_embedder.padding_idx,
             num_masks=1,
             resample_mask_every=0) 
-    if hparams.count_MADE_loss_tl:
+    if hparams.aux.count_MADE_tl:
         tms['count_made'] = CorrelatedPoissonsTM(
             vocab_size=tgt_embedder.num_embeddings, 
-            latent_size=hparams.latent_size, 
-            hidden_sizes=[hparams.hidden_size, hparams.hidden_size], 
+            latent_size=hparams.latent.size, 
+            hidden_sizes=[hparams.hidden.size, hparams.hidden.size], 
             pad_idx=tgt_embedder.padding_idx,
             num_masks=1,
             resample_mask_every=0) 
-    if hparams.shuffle_lm_tl: 
+    if hparams.aux.shuffle_lm_tl: 
         raise NotImplementedError("This is not yet supported")
-    if hparams.ibm1_loss:
+    if hparams.aux.ibm1:
         tms['ibm1'] = IBM1TM(
             src_embed=src_embedder,
-            latent_size=hparams.latent_size,
-            hidden_size=hparams.hidden_size,
+            latent_size=hparams.latent.size,
+            hidden_size=hparams.hidden.size,
             src_vocab_size=src_embedder.num_embeddings,
             tgt_vocab_size=tgt_embedder.num_embeddings,
             pad_idx=tgt_embedder.padding_idx)
@@ -112,35 +112,35 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
     if not hparams.inf3:
         # Inference components
         inf_encoder = get_inference_encoder(
-            encoder_style=hparams.inf_encoder_style,
-            conditioning_context=hparams.inf_conditioning,
+            encoder_style=hparams.inf.encoder_style,
+            conditioning_context=hparams.inf.conditioning,
             embedder_x=src_embedder,
             embedder_y=tgt_embedder,
-            hidden_size=hparams.hidden_size,
+            hidden_size=hparams.hidden.size,
             rnn_bidirectional=hparams.bidirectional,
-            rnn_num_layers=hparams.num_enc_layers,
+            rnn_num_layers=hparams.enc.num_layers,
             rnn_cell_type=hparams.cell_type,
-            transformer_heads=hparams.transformer_heads, 
-            transformer_layers=hparams.num_enc_layers, 
-            nli_shared_size=hparams.emb_size,
+            transformer_heads=hparams.transformer.heads, 
+            transformer_layers=hparams.enc.num_layers, 
+            nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
             composition="maxpool" if hparams.max_pooling_states else "avg")
-        if len(latent_sizes) != len(hparams.posterior.split(";")):
+        if len(latent_sizes) != len(hparams.posterior.type.split(";")):
             raise ValueError("You need as many posteriors as you have priors")
         conditioners = []
-        for family, latent_size in zip(hparams.posterior.split(";"), latent_sizes):
+        for family, latent_size in zip(hparams.posterior.type.split(";"), latent_sizes):
             family = family.strip().lower()
             if family == "gaussian":
-                conditioners.append(NormalLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+                conditioners.append(NormalLayer(inf_encoder.output_size, hparams.hidden.size, latent_size))
             elif family == "kumaraswamy":
-                conditioners.append(KumaraswamyLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+                conditioners.append(KumaraswamyLayer(inf_encoder.output_size, hparams.hidden.size, latent_size))
             elif family == "hardkumaraswamy":
-                conditioners.append(HardKumaraswamyLayer(inf_encoder.output_size, hparams.hidden_size, latent_size))
+                conditioners.append(HardKumaraswamyLayer(inf_encoder.output_size, hparams.hidden.size, latent_size))
             else:
                 raise NotImplementedError("I cannot design %s posterior approximation." % family)
         inf_model = BasicInferenceModel(
-            latent_size=hparams.latent_size,
+            latent_size=hparams.latent.size,
             conditioner=conditioners[0] if len(conditioners) == 1 else ProductOfConditionalsLayer(conditioners),
             encoder=inf_encoder)
     else:  # create 3 inference models and wrap them around a single container
@@ -153,13 +153,13 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             conditioning_context='x',
             embedder_x=src_embedder,
             embedder_y=tgt_embedder,
-            hidden_size=hparams.hidden_size,
+            hidden_size=hparams.hidden.size,
             rnn_bidirectional=hparams.bidirectional,
-            rnn_num_layers=hparams.num_enc_layers,
+            rnn_num_layers=hparams.enc.num_layers,
             rnn_cell_type=hparams.cell_type,
-            transformer_heads=hparams.transformer_heads, 
-            transformer_layers=hparams.num_enc_layers, 
-            nli_shared_size=hparams.emb_size,
+            transformer_heads=hparams.transformer.heads, 
+            transformer_layers=hparams.enc.num_layers, 
+            nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
             composition="maxpool" if hparams.max_pooling_states else "avg")
@@ -168,13 +168,13 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             conditioning_context='y',
             embedder_x=src_embedder,
             embedder_y=tgt_embedder,
-            hidden_size=hparams.hidden_size,
+            hidden_size=hparams.hidden.size,
             rnn_bidirectional=hparams.bidirectional,
-            rnn_num_layers=hparams.num_enc_layers,
+            rnn_num_layers=hparams.enc.num_layers,
             rnn_cell_type=hparams.cell_type,
-            transformer_heads=hparams.transformer_heads, 
-            transformer_layers=hparams.num_enc_layers, 
-            nli_shared_size=hparams.emb_size,
+            transformer_heads=hparams.transformer.heads, 
+            transformer_layers=hparams.enc.num_layers, 
+            nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
             composition="maxpool" if hparams.max_pooling_states else "avg")
@@ -186,31 +186,31 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
                 conditioning_context='xy',
                 embedder_x=src_embedder,
                 embedder_y=tgt_embedder,
-                hidden_size=hparams.hidden_size,
+                hidden_size=hparams.hidden.size,
                 rnn_bidirectional=hparams.bidirectional,
-                rnn_num_layers=hparams.num_enc_layers,
+                rnn_num_layers=hparams.enc.num_layers,
                 rnn_cell_type=hparams.cell_type,
-                transformer_heads=hparams.transformer_heads, 
-                transformer_layers=hparams.num_enc_layers, 
-                nli_shared_size=hparams.emb_size,
+                transformer_heads=hparams.transformer.heads, 
+                transformer_layers=hparams.enc.num_layers, 
+                nli_shared_size=hparams.emb.size,
                 nli_max_distance=20,  # TODO: generalise 
                 dropout=hparams.dropout, 
                 composition="maxpool" if hparams.max_pooling_states else "avg")
         inf_model = SwitchingInferenceModel(
             BasicInferenceModel(
-                family=hparams.posterior,
-                latent_size=hparams.latent_size,
-                hidden_size=hparams.hidden_size,
+                family=hparams.posterior.type,
+                latent_size=hparams.latent.size,
+                hidden_size=hparams.hidden.size,
                 encoder=encoder_x),
             BasicInferenceModel(
-                family=hparams.posterior,
-                latent_size=hparams.latent_size,
-                hidden_size=hparams.hidden_size,
+                family=hparams.posterior.type,
+                latent_size=hparams.latent.size,
+                hidden_size=hparams.hidden.size,
                 encoder=encoder_y),
             BasicInferenceModel(
-                family=hparams.posterior,
-                latent_size=hparams.latent_size,
-                hidden_size=hparams.hidden_size,
+                family=hparams.posterior.type,
+                latent_size=hparams.latent.size,
+                hidden_size=hparams.hidden.size,
                 encoder=encoder_xy),
             )
     return inf_model
@@ -218,19 +218,19 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
 
 def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
-    src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb_size, padding_idx=vocab_src[PAD_TOKEN])
-    tgt_embedder = torch.nn.Embedding(vocab_tgt.size(), hparams.emb_size, padding_idx=vocab_tgt[PAD_TOKEN])
+    src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
+    tgt_embedder = torch.nn.Embedding(vocab_tgt.size(), hparams.emb.size, padding_idx=vocab_tgt[PAD_TOKEN])
     
     language_model = CorrelatedCategoricalsLM(
         embedder=src_embedder,
         sos_idx=vocab_src[SOS_TOKEN],
         eos_idx=vocab_src[EOS_TOKEN],
-        latent_size=hparams.latent_size,
-        hidden_size=hparams.hidden_size,
+        latent_size=hparams.latent.size,
+        hidden_size=hparams.hidden.size,
         dropout=hparams.dropout,
-        num_layers=hparams.num_dec_layers,
+        num_layers=hparams.dec.num_layers,
         cell_type=hparams.cell_type,
-        tied_embeddings=hparams.tied_embeddings,
+        tied_embeddings=hparams.emb.tied,
         feed_z=hparams.feed_z,
         gate_z=False  # TODO implement
     )
@@ -249,38 +249,38 @@ def create_model(hparams, vocab_src, vocab_tgt):
         tgt_eos_idx=vocab_tgt[EOS_TOKEN],
         encoder=encoder,
         decoder=decoder,
-        latent_size=hparams.latent_size,
+        latent_size=hparams.latent.size,
         dropout=hparams.dropout,
         feed_z=hparams.feed_z,
-        tied_embeddings=hparams.tied_embeddings
+        tied_embeddings=hparams.emb.tied
     )
    
     priors = []
-    n_priors = len(hparams.prior.split(";"))
-    if hparams.latent_sizes:
-        latent_sizes = [int(size) for size in re.split('[ ;:,]+', hparams.latent_sizes.strip())]
+    n_priors = len(hparams.prior.type.split(";"))
+    if hparams.latent.sizes:
+        latent_sizes = [int(size) for size in re.split('[ ;:,]+', hparams.latent.sizes.strip())]
         if len(latent_sizes) != n_priors:
             raise ValueError("You need to specify a latent_size for each prior using --latent_sizes 'list'")
-        if sum(latent_sizes) != hparams.latent_size:
+        if sum(latent_sizes) != hparams.latent.size:
             raise ValueError("The sum of latent_sizes must equal latent_size")
     else:
-        if hparams.latent_size % n_priors != 0:
+        if hparams.latent.size % n_priors != 0:
             raise ValueError("Use a latent size multiple of the number of priors")
-        latent_sizes = [hparams.latent_size // n_priors] * n_priors
-    for prior_family, prior_params, latent_size in zip(hparams.prior.split(";"), hparams.prior_params.split(";"), latent_sizes):
+        latent_sizes = [hparams.latent.size // n_priors] * n_priors
+    for prior_family, prior_params, latent_size in zip(hparams.prior.type.split(";"), hparams.prior.params.split(";"), latent_sizes):
         prior_params = [float(param) for param  in prior_params.split()]
         priors.append(create_prior(prior_family, latent_size, prior_params))
 
     inf_model = create_inference_model(
-        DetachedEmbeddingLayer(src_embedder) if hparams.inf_share_embeddings else torch.nn.Embedding(
+        DetachedEmbeddingLayer(src_embedder) if hparams.inf.share_embeddings else torch.nn.Embedding(
             src_embedder.num_embeddings, src_embedder.embedding_dim, padding_idx=src_embedder.padding_idx),
-        DetachedEmbeddingLayer(tgt_embedder) if hparams.inf_share_embeddings else torch.nn.Embedding(
+        DetachedEmbeddingLayer(tgt_embedder) if hparams.inf.share_embeddings else torch.nn.Embedding(
             tgt_embedder.num_embeddings, tgt_embedder.embedding_dim, padding_idx=tgt_embedder.padding_idx),
         latent_sizes,
         hparams)
 
     model = AEVNMT(
-        latent_size=hparams.latent_size,
+        latent_size=hparams.latent.size,
         src_embedder=src_embedder,
         tgt_embedder=tgt_embedder,
         language_model=language_model,
@@ -288,13 +288,13 @@ def create_model(hparams, vocab_src, vocab_tgt):
         inference_model=inf_model,
         dropout=hparams.dropout,
         feed_z=hparams.feed_z,
-        tied_embeddings=hparams.tied_embeddings,
+        tied_embeddings=hparams.emb.tied,
         prior=priors[0] if len(priors) == 1 else ProductOfPriorsLayer(priors),
-        mdr=hparams.minimum_desired_rate,
+        mdr=hparams.kl.mdr,
         aux_lms=aux_lms,
         aux_tms=aux_tms,
-        mixture_likelihood=hparams.mixture_likelihood,
-        mixture_likelihood_dir_prior=hparams.mixture_likelihood_dir_prior)
+        mixture_likelihood=hparams.likelihood.mixture,
+        mixture_likelihood_dir_prior=hparams.likelihood.mixture_dir_prior)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
@@ -308,8 +308,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
     # Do linear annealing of the KL over KL_annealing_steps if set.
-    if hparams.KL_annealing_steps > 0:
-        KL_weight = min(1., (1.0 / hparams.KL_annealing_steps) * step)
+    if hparams.kl.annealing_steps > 0:
+        KL_weight = min(1., (1.0 / hparams.kl.annealing_steps) * step)
     else:
         KL_weight = 1.
 
@@ -326,7 +326,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     #else: 
     #    loss_cfg = {'lm/main', 'tm/main'}
     loss = model.loss(tm_likelihood, lm_likelihood, y_out, x_out, qz,
-                      free_nats=hparams.KL_free_nats,
+                      free_nats=hparams.kl.free_nats,
                       KL_weight=KL_weight,
                       reduction="mean",
                       aux_lm_likelihoods=aux_lm_likelihoods,
@@ -440,29 +440,29 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
         hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
 
-        if hparams.sample_decoding:
+        if hparams.dec.sample:
             # TODO: we could use the new version below
             #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
-            #    max_len=hparams.max_decoding_length, greedy=False)
+            #    max_len=hparams.dec.max_length, greedy=False)
             raw_hypothesis = sampling_decode(
                 model.translation_model.decoder, 
                 model.translation_model.tgt_embed,
                 model.translation_model.generate, hidden,
                 encoder_outputs, encoder_final,
                 seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,
+                vocab_tgt[PAD_TOKEN], hparams.dec.max_length,
                 z if hparams.feed_z else None)
         elif hparams.beam_width <= 1:
             # TODO: we could use the new version below
             #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
-            #    max_len=hparams.max_decoding_length, greedy=True)
+            #    max_len=hparams.dec.max_length, greedy=True)
             raw_hypothesis = greedy_decode(
                 model.translation_model.decoder, 
                 model.translation_model.tgt_embed,
                 model.translation_model.generate, hidden,
                 encoder_outputs, encoder_final,
                 seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                vocab_tgt[PAD_TOKEN], hparams.max_decoding_length,
+                vocab_tgt[PAD_TOKEN], hparams.dec.max_length,
                 z if hparams.feed_z else None)
         else:
             raw_hypothesis = beam_search(
@@ -474,7 +474,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                 vocab_tgt[PAD_TOKEN], hparams.beam_width,
                 hparams.length_penalty_factor,
-                hparams.max_decoding_length,
+                hparams.dec.max_length,
                 z if hparams.feed_z else None)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)

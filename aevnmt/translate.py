@@ -25,9 +25,9 @@ class TranslationEngine:
         output_dir = Path(hparams.output_dir)
         verbose = hparams.verbose
 
-        if hparams.vocab_prefix is None:
-            hparams.vocab_prefix = output_dir / "vocab"
-            hparams.share_vocab = False
+        if hparams.vocab.prefix is None:
+            hparams.vocab.prefix = output_dir / "vocab"
+            hparams.vocab.shared = False
 
         # Select the correct device (GPU or CPU).
         device = torch.device("cuda:0") if hparams.use_gpu else torch.device("cpu")
@@ -38,9 +38,9 @@ class TranslationEngine:
             tgt_tokenizer_lang = hparams.tgt
         else:
             src_tokenizer_lang = tgt_tokenizer_lang = None
-        if hparams.bpe_codes_prefix:
-            src_bpe_codes = f"{hparams.bpe_codes_prefix}.{hparams.src}"
-            tgt_bpe_codes = f"{hparams.bpe_codes_prefix}.{hparams.tgt}"
+        if hparams.bpe.codes_prefix:
+            src_bpe_codes = f"{hparams.bpe.codes_prefix}.{hparams.src}"
+            tgt_bpe_codes = f"{hparams.bpe.codes_prefix}.{hparams.tgt}"
         else:
             src_bpe_codes = tgt_bpe_codes = None
 
@@ -100,9 +100,9 @@ class TranslationEngine:
             postprocess.append(Recaser(hparams.tgt))
 
         # Word segmentation
-        if hparams.bpe_codes_prefix:
-            preprocess.append(WordSegmenter(f"{hparams.bpe_codes_prefix}.{hparams.src}", separator=hparams.subword_token))
-        if hparams.bpe_merge:
+        if hparams.bpe.codes_prefix:
+            preprocess.append(WordSegmenter(f"{hparams.bpe.codes_prefix}.{hparams.src}", separator=hparams.subword_token))
+        if hparams.bpe.merge:
             postprocess.append(WordDesegmenter(separator=hparams.subword_token))
 
         return Pipeline(pre=preprocess, post=list(reversed(postprocess)))
@@ -257,20 +257,20 @@ def main(hparams=None):
 
     engine.load_statics()
 
-    if hparams.interactive_translation > 0:
-        if hparams.interactive_translation == 1:
+    if hparams.translation.interactive > 0:
+        if hparams.translation.interactive == 1:
             engine.interactive_translation()
         else:
-            engine.interactive_translation_n(wait_for=hparams.interactive_translation)
-    elif hparams.translation_input_file == '-':
+            engine.interactive_translation_n(wait_for=hparams.translation.interactive)
+    elif hparams.translation.input_file == '-':
         engine.translate_stdin()
     else:
-        if hparams.translation_ref_file and hparams.split_sentences:
+        if hparams.translation.ref_file and hparams.split_sentences:
             raise ValueError("If you enable sentence splitting you will compromise line-alignment with the reference")
         engine.translate_file(
-            input_path=hparams.translation_input_file,
-            output_path=hparams.translation_output_file,
-            reference_path=hparams.translation_ref_file
+            input_path=hparams.translation.input_file,
+            output_path=hparams.translation.output_file,
+            reference_path=hparams.translation.ref_file
         )
 
 if __name__ == "__main__":

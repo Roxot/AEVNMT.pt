@@ -7,3 +7,4 @@ subword-nmt
 sacrebleu
 sacremoses
 mosestokenizer
+jsonargparse

@@ -21,18 +21,18 @@ from aevnmt.opt_utils import construct_optimizers, lr_scheduler_step
 
 
 def create_model(hparams, vocab_src, vocab_tgt):
-    if hparams.model_type == "cond_nmt":
+    if hparams.model.type == "cond_nmt":
         model = nmt_helper.create_model(hparams, vocab_src, vocab_tgt)
         train_fn = nmt_helper.train_step
         validate_fn = nmt_helper.validate
         translate_fn = nmt_helper.translate
-    elif hparams.model_type == "aevnmt":
+    elif hparams.model.type == "aevnmt":
         model = aevnmt_helper.create_model(hparams, vocab_src, vocab_tgt)
         train_fn = aevnmt_helper.train_step
         validate_fn = aevnmt_helper.validate
         translate_fn = aevnmt_helper.translate
     else:
-        raise Exception(f"Unknown model_type: {hparams.model_type}")
+        raise Exception(f"Unknown model_type: {hparams.model.type}")
 
     return model, train_fn, validate_fn, translate_fn
 
@@ -203,7 +203,7 @@ def main():
 
     # Load the data and print some statistics.
     vocab_src, vocab_tgt = load_vocabularies(hparams)
-    if hparams.share_vocab:
+    if hparams.vocab.shared:
         print("\n==== Vocabulary")
         vocab_src.print_statistics()
     else:
@@ -237,22 +237,22 @@ def main():
     print(f"\nNumber of model parameters: {param_count_M:.2f} M")
 
     # Initialize the model parameters, or load a checkpoint.
-    if hparams.model_checkpoint is None:
+    if hparams.model.checkpoint is None:
         print("\nInitializing parameters...")
         initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.cell_type,
-                         hparams.emb_init_scale, verbose=True)
+                         hparams.emb.init_scale, verbose=True)
     else:
-        print(f"\nRestoring model parameters from {hparams.model_checkpoint}...")
-        model.load_state_dict(torch.load(hparams.model_checkpoint))
+        print(f"\nRestoring model parameters from {hparams.model.checkpoint}...")
+        model.load_state_dict(torch.load(hparams.model.checkpoint))
 
     # Create the output directories.
     out_dir = Path(hparams.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if hparams.vocab_prefix is None:
+    if hparams.vocab.prefix is None:
         vocab_src.save(out_dir / f"vocab.{hparams.src}")
         vocab_tgt.save(out_dir / f"vocab.{hparams.tgt}")
-        hparams.vocab_prefix = out_dir / "vocab"
+        hparams.vocab.prefix = out_dir / "vocab"
     hparams.save(out_dir / "hparams")
     print("\n==== Output")
     print(f"Created output directory at {hparams.output_dir}")
