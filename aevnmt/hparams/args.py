@@ -88,6 +88,7 @@ model_args = {
     "dec.style": (str, "luong", False, "Decoder style: luong|bahdanau", 1),
     "enc.num_layers": (int, 1, False, "The number of encoder layers.", 1),
     "dec.num_layers": (int, 1, False, "The number of decoder layers.", 1),
+    "lm.style": (str, "rnn", False, "The type of language model architecture: rnn|transformer", 1)
 }
 
 aux_args = {

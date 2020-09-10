@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 
-from aevnmt.components import LuongDecoder
+from aevnmt.components import LuongDecoder, TransformerDecoder
 
 # from onmt
 def tile(x, count, dim=0):
@@ -39,8 +39,22 @@ def tile(x, count, dim=0):
         x = x.permute(perm).contiguous()
     return x
 
+
 def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
-                encoder_final, seq_mask_x, sos_idx, eos_idx, pad_idx, beam_width, alpha,
+                encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width, 
+                alpha, max_len,z=None):
+    if isinstance(decoder, TransformerDecoder):
+        return beam_search_transformer(
+            decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
+            encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width,
+            alpha, max_len, z=z)
+    return beam_search_rnn(
+        decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
+        encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width,
+        alpha, max_len, z=z)
+
+def beam_search_rnn(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
+                encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width, alpha,
                 max_len,z=None):
     """
     Beam search with size beam_width. Follows OpenNMT-py implementation.

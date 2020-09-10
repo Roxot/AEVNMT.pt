@@ -217,7 +217,7 @@ class CombinedTransformerEncoder(InferenceEncoder):
 def get_inference_encoder(encoder_style: str, conditioning_context: str,
         embedder_x, embedder_y, hidden_size,
         rnn_bidirectional, rnn_num_layers, rnn_cell_type,
-        transformer_heads, transformer_layers,
+        transformer_heads, transformer_layers, transformer_hidden,
         nli_shared_size, nli_max_distance,
         dropout=0.0,composition="avg") -> InferenceEncoder:
     """Creates the appropriate encoder as a function of encoder_style and conditioning_context."""
@@ -244,7 +244,7 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
         if conditioning_context == "x":
             encoder = TransformerEncoderX(
                 embedder=embedder_x,
-                hidden_size=hidden_size,
+                hidden_size=transformer_hidden,
                 num_heads=transformer_heads,
                 num_layers=transformer_layers,
                 dropout=dropout,
@@ -252,13 +252,13 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
         elif conditioning_context == "y":
             encoder = TransformerEncoderY(
                 embedder=embedder_y,
-                hidden_size=hidden_size,
+                hidden_size=transformer_hidden,
                 num_heads=transformer_heads,
                 num_layers=transformer_layers,
                 dropout=dropout,
                 composition="first")
         else:
-            # TODO add CombinedTransformerEncoder and test. Implementation already exists in models.transformer
+            # TODO add CombinedTransformerEncoder and test. Implementation already exists.
             raise NotImplementedError("I cannot yet condition on the pair (x,y) with a Transformer, but I welcome contributions!")
     elif encoder_style == "nli":
         if conditioning_context == "xy":

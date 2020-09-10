@@ -816,7 +816,7 @@ class TransformerLM(GenerativeLM):
         self.dropout_layer = nn.Dropout(p=dropout)
 
         # For future experiments, different methods of adding z into the transformer.
-        assert feed_z_method in ['first'], "Unknown feed_z_method: {}".format(feed_z_method)
+        assert feed_z_method in ['first', 'none'], "Unknown feed_z_method: {}".format(feed_z_method)
         self.feed_z_method = feed_z_method
 
         self.fc_z = nn.Linear(latent_size, embedder.embedding_dim)

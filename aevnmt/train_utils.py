@@ -9,7 +9,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from aevnmt.data import MemMappedCorpus, MemMappedParallelCorpus
 from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword_tokens
-from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, TransformerEncoder, RNNEncoder
+from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, 
+from aevnmt.components import RNNEncoder, TransformerEncoder, TransformerDecoder
 
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
@@ -110,10 +111,10 @@ def create_encoder(hparams):
                              cell_type=hparams.cell_type)
     elif hparams.enc.style == "transformer":
         return TransformerEncoder(input_size=hparams.emb.size,
-                                     num_heads=hparams.transformer.heads,
-                                     num_layers=hparams.enc.num_layers,
-                                     dim_ff=hparams.transformer.hidden,
-                                     dropout=hparams.dropout)
+                                  hidden_size=hparams.transformer.hidden,
+                                  num_heads=hparams.transformer.heads,
+                                  num_layers=hparams.enc.num_layers,
+                                  dropout=hparams.dropout)
     else:
         raise Exception(f"Unknown encoder style: {hparams.enc.style}")
 
@@ -137,6 +138,13 @@ def create_decoder(attention, hparams):
                             cell_type=hparams.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
                             feed_z_size=hparams.latent.size if hparams.feed_z else 0)
+    elif hparams.dec.style == "transformer":
+        return TransformerDecoder(
+            input=hparams.emb.size,
+            hidden_size=hparams.transformer.hidden,
+            num_heads=hparams.transformer.heads,
+            num_layers=hparams.transformer.num_layers,
+            dropout=hparams.dropout)
     else:
         raise Exception(f"Unknown decoder style: {hparams.dec.style}")
 
