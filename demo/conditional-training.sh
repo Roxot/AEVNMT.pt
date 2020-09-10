@@ -5,7 +5,7 @@ SRC=de
 TGT=en
 DATA=${TAG}/data
 OUTPUT=${TAG}/models/conditional
-HPARAMS=hparams/conditional_flickr.json
+HPARAMS=hparams/conditional_flickr.yaml
 
 mkdir -p ${OUTPUT}
 

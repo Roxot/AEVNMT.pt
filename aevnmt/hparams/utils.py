@@ -1,37 +1,35 @@
-import functools
-from argparse import ArgumentTypeError
+import json
+from .hparams import Hyperparameters
 
 
-def str_to_str_list(values):
-    if isinstance(values, str):
-        values = (str(v) for v in values.split())
-    else:
-        values = (str(v) for v in values)
-    return list(values)
+def convert_config(fn, translation_dict):
+    """
+    Convert old non-nested json config to nested YAML config.
 
+    This only works with json configs that are compatible with
+    the previous parser (all arguments have to be in hparam_translation_dict.yaml)
 
-def str_to_float_list(values):
-    if isinstance(values, str):
-        values = (float(v) for v in values.split())
-    else:
-        values = (float(v) for v in values)
-    return list(values)
+    :param fn: [description]
+    :type fn: function
+    :param translation_dict: [description]
+    :type translation_dict: [type]
+    """
+    correct_config = True
+    with open(fn, 'r') as f:
+        cfg = json.load(f)
+        
+    new_cfg = dict()
+    for k, v in cfg.items():
+        if k in translation_dict:
+            new_cfg[translation_dict[k]] = v
+        else:
+            correct_config = False
+    if not correct_config:
+        print(f'{fn} contains an incorrect config, and is not converted.')
+        return
 
-
-def str_to_int_list(values):
-    if isinstance(values, str):
-        values = (int(v) for v in values.split())
-    else:
-        values = (int(v) for v in values)
-    return list(values)
-
-
-def str_to_bool(v):
-    """Source: https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse"""
-    if isinstance(v, bool):
-        return v
-    if v.lower() in ('yes', 'true', 't', 'y', '1'):
-        return True
-    if v.lower() in ('no', 'false', 'f', 'n', '0'):
-        return False
-    raise ArgumentTypeError('Boolean value expected.')
+    parser = Hyperparameters(check_required=False)._parser
+    new_cfg = parser.parse_object(new_cfg)
+    
+    new_fn = Path(fn).with_suffix('.yaml')
+    parser.save(new_cfg, str(new_fn), format='yaml', overwrite=True)

@@ -1,7 +1,6 @@
 import jsonargparse
 from jsonargparse import ArgumentParser, ActionConfigFile
-from .utils import str_to_bool
-from .args import arg_groups
+from .args import arg_groups, str_to_bool
 
 
 class Hyperparameters:
@@ -35,7 +34,7 @@ class Hyperparameters:
         print(self)
 
     def save(self, filename):
-        self._parser.save(self._args, path=str(filename), skip_none=False, overwrite=True)
+        self._parser.save(self._args, path=str(filename), skip_none=True, overwrite=True)
 
     def __str__(self):
         """

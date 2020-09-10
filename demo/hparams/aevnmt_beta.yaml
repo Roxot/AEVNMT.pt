@@ -1,0 +1,104 @@
+attention: bahdanau
+aux:
+  MADE: false
+  MADE_tl: false
+  bow: false
+  bow_tl: false
+  count_MADE: false
+  count_MADE_tl: false
+  ibm1: false
+  shuffle_lm: false
+  shuffle_lm_keep_bpe: false
+  shuffle_lm_tl: false
+batch_size: 80
+beam_width: 10
+bidirectional: true
+bpe:
+  merge: true
+cell_type: lstm
+criterion: bleu
+dec:
+  max_length: 50
+  num_layers: 1
+  sample: false
+  style: bahdanau
+detokenize: false
+draw_translations: 0
+dropout: 0.5
+emb:
+  init_scale: 0.01
+  size: 256
+  tied: true
+enc:
+  num_layers: 1
+  style: rnn
+evaluate_every: -1
+feed_z: false
+gen:
+  l2_weight: 0.0
+  lr: 0.002
+  opt: adam
+hidden:
+  size: 256
+inf:
+  conditioning: x
+  encoder_style: rnn
+  l2_weight: 0.0
+  lr: 0.002
+  opt: adam
+  share_embeddings: false
+inf3: ''
+inf3_comb_composition: cat
+kl:
+  annealing_steps: 0
+  free_nats: 10.0
+  mdr: -1.0
+latent:
+  size: 32
+  sizes: ''
+length_penalty_factor: 1.0
+likelihood:
+  mixture: false
+  mixture_dir_prior: 0.0
+lowercase: false
+lr:
+  min: 5.0e-07
+  reduce_cooldown: 2
+  reduce_factor: 0.5
+  reduce_patience: 3
+  scheduler: reduce_on_plateau
+  warmup: 4000
+max_gradient_norm: 4.0
+max_pooling_states: false
+max_sentence_length: 50
+model:
+  type: aevnmt
+num_epochs: 10
+patience: 2
+posterior:
+  type: kumaraswamy
+postprocess_ref: false
+print_every: 100
+prior:
+  params: '[0.5, 0.5]'
+  type: beta
+recase: false
+show_raw_output: false
+split_sentences: false
+src: en
+subword_token: '@@'
+tgt: de
+tokenize: false
+transformer:
+  heads: 8
+  hidden: 2048
+translation:
+  interactive: 0
+use_gpu: false
+use_memmap: false
+verbose: false
+vocab:
+  max_size: -1
+  min_freq: 0
+  shared: true
+word_dropout: 0.0
