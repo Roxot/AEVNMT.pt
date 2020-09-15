@@ -690,6 +690,9 @@ class TransformerTM(GenerativeTM):
         self.fc_z_enc = nn.Linear(latent_size, src_embedder.embedding_dim)
         self.fc_z_dec = nn.Linear(latent_size, tgt_embedder.embedding_dim)
 
+        # A function alias to clean up beam search code.
+        self.tgt_embed = self.prepare_decoder_input
+
     def prepare_decoder_input(self, y, encoder_out, seq_len_x, z):
         """
         embed y, and add z to inputs according to self.feed_z_method.
@@ -735,8 +738,7 @@ class TransformerTM(GenerativeTM):
         return F.linear(pre_output, self.output_matrix)
 
     def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Distribution:
-        x_emb, seq_len_x = self.prepare_encoder_input(x, seq_len_x, z)
-        encoder_out, _ = self.encoder(x_emb, seq_len_x)
+        encoder_out, seq_len_x = self.encode(x, seq_len_x, z)
 
         y_emb, encoder_out, seq_len_x = self.prepare_decoder_input(y, encoder_out, seq_len_x, z)
         decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
@@ -759,8 +761,7 @@ class TransformerTM(GenerativeTM):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
     
     def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
-        x_emb, seq_len_x = self.prepare_encoder_input(x, seq_len_x, z)
-        encoder_out, _ = self.encoder(x_emb, seq_len_x)
+        encoder_out, seq_len_x = self.encoder(x_emb, seq_len_x, z)
         batch_size = x.size(0)
         prev_y = torch.full(size=[batch_size, 1], fill_value=self.tgt_sos_idx, dtype=torch.long, device=x.device)
 

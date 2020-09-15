@@ -82,12 +82,12 @@ class TransformerEncoder(nn.Module):
 
         # Create a sequence mask.
         if seq_len is not None:
-            pad_mask = generate_padding_mask(seq_len, max_len=x_embed.size(0))
+            pad_mask = generate_padding_mask(seq_len, max_len=x_embed.size(0)).to(x_embed.device)
         else:
             pad_mask = None
 
         if self.autoregressive:
-            attn_mask = generate_square_subsequent_mask(x_embed.size(0))
+            attn_mask = generate_square_subsequent_mask(x_embed.size(0)).to(x_embed.device)
         else:
             attn_mask = None
 
@@ -123,8 +123,8 @@ class TransformerDecoder(nn.Module):
         mem = mem.permute(1, 0, 2)
 
         # Make padding masks and causal mask.
-        mem_pad_mask = generate_padding_mask(mem_len, max_len=mem.size(0))
-        causal_mask = generate_square_subsequent_mask(y_embed.size(0))
+        mem_pad_mask = generate_padding_mask(mem_len, max_len=mem.size(0)).to(y_embed.device)
+        causal_mask = generate_square_subsequent_mask(y_embed.size(0)).to(y_embed.device)
         out = self.transformer_dec(tgt=y_embed, memory=mem,
                                    tgt_mask=causal_mask,
                                    memory_key_padding_mask=mem_pad_mask)

@@ -9,7 +9,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from aevnmt.data import MemMappedCorpus, MemMappedParallelCorpus
 from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword_tokens
-from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, 
+from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder
 from aevnmt.components import RNNEncoder, TransformerEncoder, TransformerDecoder
 
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
@@ -140,10 +140,10 @@ def create_decoder(attention, hparams):
                             feed_z_size=hparams.latent.size if hparams.feed_z else 0)
     elif hparams.dec.style == "transformer":
         return TransformerDecoder(
-            input=hparams.emb.size,
+            input_size=hparams.emb.size,
             hidden_size=hparams.transformer.hidden,
             num_heads=hparams.transformer.heads,
-            num_layers=hparams.transformer.num_layers,
+            num_layers=hparams.dec.num_layers,
             dropout=hparams.dropout)
     else:
         raise Exception(f"Unknown decoder style: {hparams.dec.style}")

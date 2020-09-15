@@ -41,13 +41,12 @@ def tile(x, count, dim=0):
 
 
 def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
-                encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width, 
+                encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width,
                 alpha, max_len,z=None):
     if isinstance(decoder, TransformerDecoder):
         return beam_search_transformer(
-            decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
-            encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width,
-            alpha, max_len, z=z)
+            decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, encoder_outputs,
+            seq_len_x, sos_idx, eos_idx, pad_idx, beam_width, alpha, max_len, z=z)
     return beam_search_rnn(
         decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
         encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width,
@@ -55,7 +54,7 @@ def beam_search(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, enc
 
 def beam_search_rnn(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden, encoder_outputs,
                 encoder_final, seq_mask_x, seq_len_x, sos_idx, eos_idx, pad_idx, beam_width, alpha,
-                max_len,z=None):
+                max_len, z=None):
     """
     Beam search with size beam_width. Follows OpenNMT-py implementation.
     In each decoding step, find the k most likely partial hypotheses.

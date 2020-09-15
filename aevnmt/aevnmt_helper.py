@@ -118,12 +118,12 @@ def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
             tgt_eos_idx=vocab_tgt[EOS_TOKEN],
             encoder=encoder,
             decoder=decoder,
-            latent_size=hparams.latent_size,
-            dropout=dropout,
+            latent_size=hparams.latent.size,
+            dropout=hparams.dropout,
             tied_embeddings=hparams.emb.tied,
             feed_z_method="first" if hparams.feed_z else "none"
         )
-    elif not (hparams.enc.style == 'transformer' ^ hparams.dec.style == 'transformer'):
+    elif (hparams.enc.style == 'transformer') ^ (hparams.dec.style == 'transformer'):
         raise NotImplementedError("When using a transformer TM, both encoder and decoder have to be transformer")
     else:
         translation_model = AttentionBasedTM(
@@ -193,10 +193,10 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_cell_type=hparams.cell_type,
             transformer_heads=hparams.transformer.heads,
             transformer_layers=hparams.enc.num_layers,
-            transformer_hidden=transformer.hidden,
+            transformer_hidden=hparams.transformer.hidden,
             nli_shared_size=hparams.emb.size,
             nli_max_distance=20, # TODO: generalise
-            dropout=hparams.dropout, 
+            dropout=hparams.dropout,
             composition="maxpool" if hparams.max_pooling_states else "avg")
         if len(latent_sizes) != len(hparams.posterior.type.split(";")):
             raise ValueError("You need as many posteriors as you have priors")
@@ -461,11 +461,16 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
             y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
             z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
             _, _, state, _, _ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
-            att_weights = state['att_weights'].squeeze().cpu().numpy()
+            if 'att_weights' in state:
+                att_weights = state['att_weights'].squeeze().cpu().numpy()
+            else:
+                att_weights = None
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
         tgt_labels = batch_to_sentences(y_out, vocab_tgt, no_filter=True)[0].split()
-        attention_summary(src_labels, tgt_labels, att_weights, summary_writer,
-                          f"{title}/validation/attention", step)
+        if att_weights is not None:
+            # TODO add attention summary for Transformer
+            attention_summary(src_labels, tgt_labels, att_weights, summary_writer,
+                            f"{title}/validation/attention", step)
 
     return {'bleu': val_bleu, 'likelihood': -val_NLL, 'nll': val_NLL, 'ppl': val_ppl}
 
@@ -483,11 +488,15 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         #z = qz.mean if deterministic else qz.sample()
         z = qz.sample()
 
-        encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
-        hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
+        if isinstance(model.translation_model, TransformerTM):
+            encoder_outputs, seq_len_x = model.translation_model.encode(x_in, seq_len_x, z)
+            encoder_final = None
+            hidden = None
+        else:
+            encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
+            hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
 
         if hparams.dec.sample:
-            # TODO: we could use the new version below
             raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
                max_len=hparams.dec.max_length, greedy=False)
             # raw_hypothesis = sampling_decode(
@@ -499,7 +508,6 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
             #     vocab_tgt[PAD_TOKEN], hparams.dec.max_length,
             #     z if hparams.feed_z else None)
         elif hparams.beam_width <= 1:
-            # TODO: we could use the new version below
             raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
                max_len=hparams.dec.max_length, greedy=True)
             # raw_hypothesis = greedy_decode(
@@ -516,7 +524,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 model.translation_model.tgt_embed, 
                 model.translation_model.generate,
                 vocab_tgt.size(), hidden, encoder_outputs,
-                encoder_final, seq_mask_x,
+                encoder_final, seq_mask_x, seq_len_x,
                 vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                 vocab_tgt[PAD_TOKEN], hparams.beam_width,
                 hparams.length_penalty_factor,
