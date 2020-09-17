@@ -53,62 +53,67 @@ def get_optimizer(name, parameters, lr, l2_weight, momentum=0.):
     return cls(params=parameters, lr=lr, weight_decay=l2_weight)
 
 
-def get_lr_scheduler(optimizer, hparams):
-    if hparams.lr.scheduler == "reduce_on_plateau":
+def get_lr_scheduler(optimizer, opt_name, hparams):
+    opt_params = getattr(hparams, opt_name).opt
+    if opt_params.lr_scheduler == "reduce_on_plateau":
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
             mode="max",
-            factor=hparams.lr.reduce_factor,
-            patience=hparams.lr.reduce_patience,
+            factor=opt_params.lr_reduce_factor,
+            patience=opt_params.lr_reduce_patience,
             verbose=False,
             threshold=1e-2,
             threshold_mode="abs",
-            cooldown=hparams.lr.reduce_cooldown,
-            min_lr=hparams.lr.min)
-    elif hparams.lr.scheduler == "noam":
+            cooldown=opt_params.lr_reduce_cooldown,
+            min_lr=opt_params.lr_min)
+    elif opt_params.lr_scheduler == "noam":
         scheduler = NoamScheduler(hidden_size=hparams.emb.size,
                                   optimizer=optimizer,
-                                  factor=hparams.lr.reduce_factor,
-                                  warmup=hparams.lr.warmup)
+                                  factor=opt_params.lr_reduce_factor,
+                                  warmup=opt_params.lr_warmup)
     return scheduler
 
 
 def construct_optimizers(hparams, gen_parameters, inf_z_parameters, lagrangian_parameters=None):
+    # TODO Generalize opt naming between hparams and optimizers
     optimizers = {
         "gen": get_optimizer(
-            hparams.gen.opt,
+            hparams.gen.opt.style,
             gen_parameters,
-            hparams.gen.lr,
-            hparams.gen.l2_weight
+            hparams.gen.opt.lr,
+            hparams.gen.opt.l2_weight
+        ),
+    }
+
+    lr_schedulers = {
+        "gen": get_lr_scheduler(
+            optimizers["gen"],
+            "gen",
+            hparams
         ),
     }
 
     if inf_z_parameters is not None:
         optimizers["inf_z"] = get_optimizer(
-            hparams.inf.opt,
+            hparams.inf.opt.style,
             inf_z_parameters,
-            hparams.inf.lr,
-            hparams.inf.l2_weight
+            hparams.inf.opt.lr,
+            hparams.inf.opt.l2_weight
         )
 
-    lr_schedulers = {
-        "gen": get_lr_scheduler(
-            optimizers["gen"],
-            hparams
-        ),
-    }
-
-    if inf_z_parameters is not None:
         lr_schedulers["inf_z"] = get_lr_scheduler(
             optimizers["inf_z"],
+            "inf",
             hparams
         )
+
+
 
     if lagrangian_parameters is not None:
         optimizers["lagrangian"] = get_optimizer(
             "adam",
             lagrangian_parameters,
-            hparams.gen.lr, 
+            hparams.gen.opt.lr,
             0.
         )
 
@@ -127,11 +132,15 @@ def lr_scheduler_step(lr_schedulers, hparams, val_score=None):
             # Don't update the ReduceLROnPlateau scheduler during training.
             if val_score is None:
                 continue
-
+            
+            if name == "inf_z":
+                opt_params = getattr(hparams, "inf").opt
+            else:
+                opt_params = getattr(hparams, "gen").opt
             lr_scheduler.step(val_score)
-            if lr_scheduler.cooldown_counter == hparams.lr.reduce_cooldown:
+            if lr_scheduler.cooldown_counter == opt_params.lr_reduce_cooldown:
                 print(f"Reduced the learning rate for '{name}' with a factor"
-                      f" {hparams.lr.reduce_cooldown}")
+                      f" {opt_params.lr_reduce_cooldown}")
 
         if isinstance(lr_scheduler, NoamScheduler):
 

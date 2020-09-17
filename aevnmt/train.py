@@ -239,7 +239,7 @@ def main():
     # Initialize the model parameters, or load a checkpoint.
     if hparams.model.checkpoint is None:
         print("\nInitializing parameters...")
-        initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.cell_type,
+        initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.inf.rnn.cell_type,
                          hparams.emb.init_scale, verbose=True)
     else:
         print(f"\nRestoring model parameters from {hparams.model.checkpoint}...")

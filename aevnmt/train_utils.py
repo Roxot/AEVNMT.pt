@@ -101,62 +101,62 @@ def load_vocabularies(hparams):
     return vocab_src, vocab_tgt
 
 def create_encoder(hparams):
-    if hparams.enc.style == "rnn":
+    if hparams.gen.tm.enc.style == "rnn":
         return RNNEncoder(emb_size=hparams.emb.size,
-                             hidden_size=hparams.hidden.size,
-                             bidirectional=hparams.bidirectional,
+                             hidden_size=hparams.gen.tm.rnn.hidden_size,
+                             bidirectional=hparams.gen.tm.rnn.bidirectional,
                              dropout=hparams.dropout,
-                             num_layers=hparams.enc.num_layers,
-                             cell_type=hparams.cell_type)
-    elif hparams.enc.style == "transformer":
+                             num_layers=hparams.gen.tm.rnn.num_layers,
+                             cell_type=hparams.gen.tm.rnn.cell_type)
+    elif hparams.gen.tm.enc.style == "transformer":
         return TransformerEncoder(input_size=hparams.emb.size,
-                                     num_heads=hparams.transformer.heads,
-                                     num_layers=hparams.enc.num_layers,
-                                     dim_ff=hparams.transformer.hidden,
+                                     num_heads=hparams.gen.tm.transformer.num_heads,
+                                     num_layers=hparams.gen.tm.transformer.num_layers,
+                                     dim_ff=hparams.gen.tm.transformer.hidden_size,
                                      dropout=hparams.dropout)
     else:
-        raise Exception(f"Unknown encoder style: {hparams.enc.style}")
+        raise Exception(f"Unknown encoder style: {hparams.gen.tm.enc.style}")
 
 def create_decoder(attention, hparams):
     init_from_encoder_final = (hparams.model.type == "cond_nmt")
-    if hparams.dec.style == "bahdanau":
+    if hparams.gen.tm.dec.style == "bahdanau":
         return BahdanauDecoder(emb_size=hparams.emb.size,
-                               hidden_size=hparams.hidden.size,
+                               hidden_size=hparams.gen.tm.rnn.hidden_size,
                                attention=attention,
                                dropout=hparams.dropout,
-                               num_layers=hparams.dec.num_layers,
-                               cell_type=hparams.cell_type,
+                               num_layers=hparams.gen.tm.rnn.num_layers,
+                               cell_type=hparams.gen.tm.rnn.cell_type,
                                init_from_encoder_final=init_from_encoder_final,
-                               feed_z_size=hparams.latent.size if hparams.feed_z else 0)
-    elif hparams.dec.style == "luong":
+                               feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
+    elif hparams.gen.tm.dec.style == "luong":
         return LuongDecoder(emb_size=hparams.emb.size,
-                            hidden_size=hparams.hidden.size,
+                            hidden_size=hparams.gen.tm.rnn.hidden_size,
                             attention=attention,
                             dropout=hparams.dropout,
-                            num_layers=hparams.dec.num_layers,
-                            cell_type=hparams.cell_type,
+                            num_layers=hparams.gen.tm.rnn.num_layers,
+                            cell_type=hparams.gen.tm.rnn.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
-                            feed_z_size=hparams.latent.size if hparams.feed_z else 0)
+                            feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
     else:
-        raise Exception(f"Unknown decoder style: {hparams.dec.style}")
+        raise Exception(f"Unknown decoder style: {hparams.gen.tm.dec.style}")
 
 def create_attention(hparams):
-    if not hparams.attention in ["luong", "scaled_luong", "bahdanau"]:
-        raise Exception(f"Unknown attention option: {hparams.attention}")
+    if not hparams.gen.tm.rnn.attention in ["luong", "scaled_luong", "bahdanau"]:
+        raise Exception(f"Unknown attention option: {hparams.gen.tm.rnn.attention}")
 
-    if hparams.enc.style == "rnn":
-        key_size = hparams.hidden.size
-        if hparams.bidirectional:
+    if hparams.gen.tm.enc.style == "rnn":
+        key_size = hparams.gen.tm.rnn.hidden_size
+        if hparams.gen.tm.rnn.bidirectional:
             key_size = key_size * 2
     else:
         key_size = hparams.emb.size
-    query_size = hparams.hidden.size
+    query_size = hparams.gen.tm.rnn.hidden_size
 
-    if "luong" in hparams.attention:
-        scale = True if hparams.attention == "scaled_luong" else False
-        attention = LuongAttention(key_size, hparams.hidden.size, scale=scale)
+    if "luong" in hparams.gen.tm.rnn.attention:
+        scale = True if hparams.gen.tm.rnn.attention == "scaled_luong" else False
+        attention = LuongAttention(key_size, hparams.gen.tm.rnn.hidden_size, scale=scale)
     else:
-        attention = BahdanauAttention(key_size, query_size, hparams.hidden.size)
+        attention = BahdanauAttention(key_size, query_size, hparams.gen.tm.rnn.hidden_size)
 
     return attention
 
