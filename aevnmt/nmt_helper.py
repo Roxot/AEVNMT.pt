@@ -20,7 +20,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
                            decoder=decoder,
                            pad_idx=vocab_tgt[PAD_TOKEN],
                            dropout=hparams.dropout,
-                           tied_embeddings=hparams.tm.dec.tied_embeddings)
+                           tied_embeddings=hparams.gen.tm.dec.tied_embeddings)
     return model
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,

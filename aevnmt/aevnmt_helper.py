@@ -230,7 +230,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
         dropout=hparams.dropout,
         num_layers=hparams.gen.lm.rnn.num_layers,
         cell_type=hparams.gen.lm.rnn.cell_type,
-        tied_embeddings=hparams.gen.lm.tied_embeddingss,
+        tied_embeddings=hparams.gen.lm.tied_embeddings,
         feed_z=hparams.gen.lm.feed_z,
         gate_z=False  # TODO implement
     )
@@ -451,7 +451,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 encoder_outputs, encoder_final,
                 seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                 vocab_tgt[PAD_TOKEN], hparams.decoding.max_length,
-                z if hparams.feed_z else None)
+                z if hparams.gen.tm.dec.feed_z else None)
         elif hparams.decoding.beam_width <= 1:
             # TODO: we could use the new version below
             #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
@@ -463,7 +463,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 encoder_outputs, encoder_final,
                 seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                 vocab_tgt[PAD_TOKEN], hparams.decoding.max_length,
-                z if hparams.feed_z else None)
+                z if hparams.gen.tm.dec.feed_z else None)
         else:
             raw_hypothesis = beam_search(
                 model.translation_model.decoder, 
@@ -475,7 +475,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 vocab_tgt[PAD_TOKEN], hparams.decoding.beam_width,
                 hparams.decoding.length_penalty_factor,
                 hparams.decoding.max_length,
-                z if hparams.feed_z else None)
+                z if hparams.gen.tm.dec.feed_z else None)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
