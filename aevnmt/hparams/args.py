@@ -35,7 +35,7 @@ def str_to_bool(v):
         return False
     raise ArgumentTypeError('Boolean value expected.')
 
-# Format: "option_name": (type, default_val, required, description, group)
+# Format: "option_name": (type, default_val, required, description)
 # `group` is for ordering purposes when printing.
 
 io_args = {
