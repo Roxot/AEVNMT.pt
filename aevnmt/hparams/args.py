@@ -39,28 +39,28 @@ def str_to_bool(v):
 # `group` is for ordering purposes when printing.
 
 io_args = {
-    "training_prefix": (str, None, True, "The prefix to bilingual training data.", 0),
-    "validation_prefix": (str, None, True, "The validation file prefix.", 0),
-    "mono_src": (str, None, False, "The source monolingual training data.", 0),
-    "mono_tgt": (str, None, False, "The target monolingual training data.", 0),
+    "training_prefix": (str, None, True, "The prefix to bilingual training data."),
+    "validation_prefix": (str, None, True, "The validation file prefix."),
+    "mono_src": (str, None, False, "The source monolingual training data."),
+    "mono_tgt": (str, None, False, "The target monolingual training data."),
 
-    "src": (str, None, True, "The source language", 0),
-    "tgt": (str, None, True, "The target language", 0),
-    "use_gpu": (bool, False, False, "Whether to use the GPU or not", 0),
-    "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)", 0),
-    "output_dir": (str, None, True, "Output directory.", 0),
-    "subword_token": (str, None, False, "The subword token, e.g. \"@@\".", 0),
+    "src": (str, None, True, "The source language"),
+    "tgt": (str, None, True, "The target language"),
+    "use_gpu": (bool, False, False, "Whether to use the GPU or not"),
+    "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
+    "output_dir": (str, None, True, "Output directory."),
+    "subword_token": (str, None, False, "The subword token, e.g. \"@@\"."),
     "max_sentence_length": (int, -1, False, "The maximum sentence length during"
-                                            " training.", 0),
+                                            " training."),
     "vocab.prefix": (str, None, False, "The vocabulary prefix, if share_vocab is True"
-                                       " this should be the vocabulary filename.", 0),
+                                       " this should be the vocabulary filename."),
     "vocab.shared": (bool, False, False, "Whether to share the vocabulary between the"
-                                       " source and target language", 0),
-    "vocab.max_size": (int, -1, False, "The maximum vocabulary size.", 0),
+                                       " source and target language"),
+    "vocab.max_size": (int, -1, False, "The maximum vocabulary size."),
     "vocab.min_freq": (int, 0, False, "The minimum frequency of a word for it"
-                                      " to be included in the vocabulary.", 0),
+                                      " to be included in the vocabulary."),
     "model.checkpoint": (str, None, False, "Checkpoint to restore the model from at"
-                                        " the beginning of training.", 0),
+                                        " the beginning of training."),
 }
 
 model_args = {
@@ -95,7 +95,7 @@ inf_args = {
     "inf.rnn.num_layers": (int, 1, False, "The number of inf rnn layers."),# TODO
     "inf.rnn.cell_type": (str, "lstm", False, "The inf rnn cell type. rnn|gru|lstm"),# TODO
     "inf.rnn.bidirectional": (bool, False, False, "Use bidirectional inf rnn"),# TODO
-    "inf.composition": (str, "avgpool", False, "Type of composition used after the inference network. avg|maxpool"),# TODO
+    "inf.composition": (str, "avg", False, "Type of composition used after the inference network. avg|maxpool"),# TODO
     "inf.inf3_comb_composition": (str, "cat", False, "Composition function used to combined encodings for q(z|x,y) if --inf3 is set"),
     "inf.inf3": (str, "", False, "Specify encoders for three different inference models, namely, q(z|x), q(z|y) and q(z|x,y),"
                                  "e.g. rnn,rnn,nli or rnn,rnn,comb. The special type 'comb' uses the other two encoders to make an encoding of the pair."),
@@ -150,22 +150,22 @@ aux_args = {
 
 opt_args = {
     # General
-    "num_epochs": (int, 1, False, "The number of epochs to train the model for.", 4),
-    "batch_size": (int, 64, False, "The batch size.", 4),
-    "print_every": (int, 100, False, "Print training statistics every x steps.", 4),
+    "num_epochs": (int, 1, False, "The number of epochs to train the model for."),
+    "batch_size": (int, 64, False, "The batch size."),
+    "print_every": (int, 100, False, "Print training statistics every x steps."),
     "max_gradient_norm": (float, 5.0, False, "The maximum gradient norm to clip the"
                                              " gradients to, to disable"
-                                             " set <= 0.", 4),
+                                             " set <= 0."),
     "patience": (int, 5, False, "The number of evaluations to continue training for"
-                                " when an improvement has been found.", 4),
-    "dropout": (float, 0., False, "The amount of dropout.", 4),
-    "word_dropout": (float, 0., False, "Fraction of input words to drop.", 4),
+                                " when an improvement has been found."),
+    "dropout": (float, 0., False, "The amount of dropout."),
+    "word_dropout": (float, 0., False, "Fraction of input words to drop."),
     "evaluate_every": (int, -1, False, "The number of batches after which to run"
                                        " evaluation. If <= 0, evaluation will happen"
-                                       " after every epoch.", 4),
-    "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')", 4)
+                                       " after every epoch."),
+    "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')"),
     # Inf
-    "inf.opt.lr_warmup": (int, 4000, False, "Inf learning rate warmup (noam_scheduler)", 4),# TODO
+    "inf.opt.lr_warmup": (int, 4000, False, "Inf learning rate warmup (noam_scheduler)"),# TODO
     "inf.opt.lr_min": (float, 1e-5, False, "The minimum  inf learning rate the learning rate"
                                    " scheduler can reduce to (reduce_on_plateau scheduler)."),# TODO
     "inf.opt.lr_reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
@@ -185,7 +185,7 @@ opt_args = {
     "inf.opt.l2_weight": (float, 0., False, "Strength of L2 regulariser for inference parameters wrt z"),
     "inf.opt.style": (str, "adam", False, "Optimizer for inference parameters wrt z (options: adam, amsgrad, adadelta, sgd)"),
     # Gen
-    "gen.opt.lr_warmup": (int, 4000, False, "Ge learning rate warmup (noam_scheduler)", 4),# TODO
+    "gen.opt.lr_warmup": (int, 4000, False, "Ge learning rate warmup (noam_scheduler)"),# TODO
     "gen.opt.lr_min": (float, 1e-5, False, "The minimum  gen learning rate the learning rate"
                                    " scheduler can reduce to (reduce_on_plateau scheduler)."),# TODO
     "gen.opt.lr_reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
@@ -222,23 +222,23 @@ kl_args = {
 translation_args = {
     # Translation hyperparameters.
     "translation.input_file": (str, None, False, "The translation input file,"
-                                               " ignored for training.", 5),
+                                               " ignored for training."),
     "translation.output_file": (str, None, False, "The translation output file,"
-                                                " ignored for training.", 5),
-    "translation.ref_file": (str, None, False, "The translation references file", 5),
-    "verbose": (bool, False, False, "Print logging information", 5),
-    "show_raw_output": (bool, False, False, "Prints raw output (tokenized, truecased, BPE-segmented, max-len splitting) to stderr", 5),
-    "translation.interactive": (int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout", 5),
-    "split_sentences": (bool, False, False, "Pass the whole input through a sentence splitter (mosestokenizer.MosesSentenceSplitter)", 5),
-    "tokenize": (bool, False, False, "Tokenize input (with sacremoses.MosesTokenizer)", 5),
-    "detokenize": (bool, False, False, "Detokenize output (with sacremoses.MosesDetokenizer)", 5),
-    "lowercase": (bool, False, False, "Lowercase the input", 5),
-    "recase": (bool, False, False, "Recase the output (with sacremoses.Detruecaser)", 5),
-    "truecaser_prefix": (str, None, False, "Truecase and de-truecases using a trained model (with sacremoses.MosesTruecaser) -- slow to load", 5),
-    "bpe.codes_prefix": (str, None, False, "Enable BPE-segmentation by providing a prefix to BPE codes (AEVNMT.pt will add .src and .tgt)", 5),
-    "bpe.merge": (bool, True, False, "Merge subwords via regex", 5),
-    "postprocess_ref": (bool, False, False, "Applies post-processing steps to reference (if provided)", 5),
-    "draw_translations": (int, 0, False, "Greedy decode a number of posterior samples", 5),
+                                                " ignored for training."),
+    "translation.ref_file": (str, None, False, "The translation references file"),
+    "verbose": (bool, False, False, "Print logging information"),
+    "show_raw_output": (bool, False, False, "Prints raw output (tokenized, truecased, BPE-segmented, max-len splitting) to stderr"),
+    "translation.interactive": (int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout"),
+    "split_sentences": (bool, False, False, "Pass the whole input through a sentence splitter (mosestokenizer.MosesSentenceSplitter)"),
+    "tokenize": (bool, False, False, "Tokenize input (with sacremoses.MosesTokenizer)"),
+    "detokenize": (bool, False, False, "Detokenize output (with sacremoses.MosesDetokenizer)"),
+    "lowercase": (bool, False, False, "Lowercase the input"),
+    "recase": (bool, False, False, "Recase the output (with sacremoses.Detruecaser)"),
+    "truecaser_prefix": (str, None, False, "Truecase and de-truecases using a trained model (with sacremoses.MosesTruecaser) -- slow to load"),
+    "bpe.codes_prefix": (str, None, False, "Enable BPE-segmentation by providing a prefix to BPE codes (AEVNMT.pt will add .src and .tgt)"),
+    "bpe.merge": (bool, True, False, "Merge subwords via regex"),
+    "postprocess_ref": (bool, False, False, "Applies post-processing steps to reference (if provided)"),
+    "draw_translations": (int, 0, False, "Greedy decode a number of posterior samples"),
 }
 
 arg_groups = {
