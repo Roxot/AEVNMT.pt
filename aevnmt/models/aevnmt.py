@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical 
 
 from aevnmt.dist import PriorLayer, get_named_params
+from aevnmt.components import label_smoothing_loss
 
 from .generative import GenerativeLM, GenerativeTM
 from .inference import InferenceModel
@@ -123,7 +124,8 @@ class AEVNMT(nn.Module):
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
-            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict(), loss_cfg=set()):
+            free_nats=0., KL_weight=1., ls_y=0., ls_x=0., reduction="mean", aux_lm_likelihoods=dict(), 
+            aux_tm_likelihoods=dict(), loss_cfg=set()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -142,10 +144,18 @@ class AEVNMT(nn.Module):
         """
         # [B]
         tm_log_likelihood = self.translation_model.log_prob(tm_likelihood, targets_y)
+        if ls_y > 0:
+            smoothing_y = label_smoothing_loss(tm_log_likelihood, targets_y, 
+                                               ignore_index=self.translation_model.tgt_embedder.padding_idx)
+            tm_log_likelihood = (1 - ls_y) * tm_log_likelihood + ls_y * smoothing_y
         tm_loss = - tm_log_likelihood
 
         # [B]
         lm_log_likelihood = self.language_model.log_prob(lm_likelihood, targets_x)
+        if ls_x > 0:
+            smoothing_x = label_smoothing_loss(lm_likelihood, targets_x,
+                                               ignore_index=self.language_model.pad_idx)
+            lm_log_likelihood = (1 - ls_x) * lm_log_likelihood + ls_x * smoothing_x
         lm_loss = - lm_log_likelihood
 
         # Compute the KL divergence between the distribution used to sample z, and the prior
