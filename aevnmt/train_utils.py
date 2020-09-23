@@ -111,17 +111,10 @@ def create_encoder(hparams):
                              cell_type=hparams.gen.tm.rnn.cell_type)
     elif hparams.gen.tm.enc.style == "transformer":
         return TransformerEncoder(input_size=hparams.emb.size,
-<<<<<<< HEAD
                                   hidden_size=hparams.gen.tm.transformer.hidden_size,
                                   num_heads=hparams.gen.tm.transformer.num_heads,
                                   num_layers=hparams.gen.tm.transformer.num_layers,
                                   dropout=hparams.dropout)
-=======
-                                     num_heads=hparams.gen.tm.transformer.num_heads,
-                                     num_layers=hparams.gen.tm.transformer.num_layers,
-                                     dim_ff=hparams.gen.tm.transformer.hidden_size,
-                                     dropout=hparams.dropout)
->>>>>>> master
     else:
         raise Exception(f"Unknown encoder style: {hparams.gen.tm.enc.style}")
 
@@ -144,7 +137,6 @@ def create_decoder(attention, hparams):
                             num_layers=hparams.gen.tm.rnn.num_layers,
                             cell_type=hparams.gen.tm.rnn.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
-<<<<<<< HEAD
                             feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
     elif hparams.dec.style == "transformer":
         return TransformerDecoder(
@@ -153,9 +145,6 @@ def create_decoder(attention, hparams):
             num_heads=hparams.gen.tm.transformer.num_heads,
             num_layers=hparams.gen.tm.transformer.num_layers,
             dropout=hparams.dropout)
-=======
-                            feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
->>>>>>> master
     else:
         raise Exception(f"Unknown decoder style: {hparams.gen.tm.dec.style}")
 

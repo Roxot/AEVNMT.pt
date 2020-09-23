@@ -64,13 +64,13 @@ def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
             embedder=src_embedder,
             sos_idx=vocab_src[SOS_TOKEN],
             eos_idx=vocab_src[EOS_TOKEN],
-            latent_size=hparams.latent.size,
-            hidden_size=hparams.transformer.hidden,
-            num_heads=hparams.transformer.heads,
-            num_layers=hparams.dec.num_layers,
+            latent_size=hparams.prior.latent_size,
+            hidden_size=hparams.gen.lm.transformer.hidden_size,
+            num_heads=hparams.gen.lm.transformer.num_heads,
+            num_layers=hparams.gen.lm.transformer.num_layers,
             dropout=hparams.dropout,
-            tied_embeddings=hparams.emb.tied,
-            feed_z_method="first" if hparams.feed_z else "none"
+            tied_embeddings=hparams.gen.lm.tied_embeddings,
+            feed_z_method="first" if gen.lm.feed_z else "none"
         )
     else:
         raise NotImplementedError(f"Unknown language model style: {hparams.lm.style}")
@@ -110,7 +110,7 @@ def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
     attention = create_attention(hparams)
     decoder = create_decoder(attention, hparams)
 
-    if hparams.enc.style == 'transformer' and hparams.dec.style == 'transformer':
+    if hparams.gen.tm.enc.style == 'transformer' and hparams.gen.tm.dec.style == 'transformer':
         translation_model = TransformerTM(
             src_embedder=src_embedder,
             tgt_embedder=tgt_embedder,
@@ -118,12 +118,12 @@ def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
             tgt_eos_idx=vocab_tgt[EOS_TOKEN],
             encoder=encoder,
             decoder=decoder,
-            latent_size=hparams.latent.size,
+            latent_size=hparams.prior.latent_size,
             dropout=hparams.dropout,
-            tied_embeddings=hparams.emb.tied,
-            feed_z_method="first" if hparams.feed_z else "none"
+            tied_embeddings=hparams.gen.tm.dec.tied_embeddings,
+            feed_z_method="first" if hparams.gen.tm.dec.feed_z else "none"
         )
-    elif (hparams.enc.style == 'transformer') ^ (hparams.dec.style == 'transformer'):
+    elif (hparams.gen.tm.enc.style == 'transformer') ^ (hparams.gen.tm.dec.style == 'transformer'):
         raise NotImplementedError("When using a transformer TM, both encoder and decoder have to be transformer")
     else:
         translation_model = AttentionBasedTM(
@@ -193,8 +193,9 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
             transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
-            nli_max_distance=20,  # TODO: generalise
+            nli_max_distance=20, # TODO: generalise
             dropout=hparams.dropout,
             composition=hparams.inf.composition)
         if len(latent_sizes) != len(hparams.posterior.family.split(";")):
@@ -230,6 +231,7 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
             transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
@@ -244,7 +246,8 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_num_layers=hparams.inf.rnn.num_layers,
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
-            transformer_layers=hparams.inf.transformer.num_layers, 
+            transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
@@ -263,6 +266,7 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
                 rnn_cell_type=hparams.inf.rnn.cell_type,
                 transformer_heads=hparams.inf.transformer.num_heads,
                 transformer_layers=hparams.inf.transformer.num_layers,
+                transformer_hidden=hparams.inf.transformer.hidden_size,
                 nli_shared_size=hparams.emb.size,
                 nli_max_distance=20,  # TODO: generalise 
                 dropout=hparams.dropout, 
