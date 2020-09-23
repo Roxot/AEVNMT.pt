@@ -239,7 +239,7 @@ def main():
     # Initialize the model parameters, or load a checkpoint.
     if hparams.model.checkpoint is None:
         print("\nInitializing parameters...")
-        initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.cell_type,
+        initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.inf.rnn.cell_type,
                          hparams.emb.init_scale, verbose=True)
     else:
         print(f"\nRestoring model parameters from {hparams.model.checkpoint}...")
@@ -252,7 +252,7 @@ def main():
     if hparams.vocab.prefix is None:
         vocab_src.save(out_dir / f"vocab.{hparams.src}")
         vocab_tgt.save(out_dir / f"vocab.{hparams.tgt}")
-        hparams.vocab.prefix = out_dir / "vocab"
+        hparams.vocab.prefix = str(out_dir / "vocab")
     hparams.save(out_dir / "hparams")
     print("\n==== Output")
     print(f"Created output directory at {hparams.output_dir}")

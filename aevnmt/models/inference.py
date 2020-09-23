@@ -64,7 +64,7 @@ class RecurrentEncoderX(InferenceEncoder):
         self.output_size = hidden_size if not bidirectional else hidden_size * 2
         self.hidden_size = hidden_size
         self.composition = composition
-        if composition not in ["avg","maxpool"]:
+        if composition not in ["avg", "maxpool"]:
             raise NotImplementedError("I only support average and maxpool, but I welcome contributions!")
 
     def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
@@ -229,7 +229,8 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
                 bidirectional=rnn_bidirectional,
                 num_layers=rnn_num_layers,
                 cell_type=rnn_cell_type,
-                dropout=dropout,composition=composition)
+                dropout=dropout,
+                composition=composition)
         elif conditioning_context == "y":
             encoder = RecurrentEncoderY(
                 embedder=embedder_y,
@@ -237,7 +238,8 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
                 bidirectional=rnn_bidirectional,
                 num_layers=rnn_num_layers,
                 cell_type=rnn_cell_type,
-                dropout=dropout,composition=composition)
+                dropout=dropout,
+                composition=composition)
         else:
             raise NotImplementedError("I cannot yet condition on the pair (x,y) with an RNN, but I welcome contributions!")
     elif encoder_style == "transformer":

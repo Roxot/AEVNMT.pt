@@ -1,10 +1,14 @@
+import sys
 import jsonargparse
-from jsonargparse import ArgumentParser, ActionConfigFile
+from jsonargparse import ArgumentParser, ActionConfigFile, ParserError
 from .args import arg_groups, str_to_bool
 
 
 class Hyperparameters:
     def __init__(self, arg_groups=arg_groups, check_required=True):
+        if "--hparams_file" in sys.argv and sys.argv.index("--hparams_file") > 1:
+            # TODO Remove this requirement.
+            raise ParserError("--hparams_file should be the first command line argument.")
         self.arg_groups = arg_groups
         self._parser = make_grouped_parser(arg_groups, check_required)
         self._args = self._parser.parse_args()
@@ -16,7 +20,7 @@ class Hyperparameters:
 
     def update_from_file(self, config_file, override=False):
         try:
-            new_args = self._parser.parse_path(config_file, defaults=True)
+            new_args = self._parser.parse_path(str(config_file), defaults=True)
         except jsonargparse.ParserError:
             print(f"ParserError: Incorrect config file: {config_file}")
             return
@@ -63,7 +67,7 @@ def make_grouped_parser(arg_groups, check_required=True):
 def add_arg_group(parser, group_name, arg_group, check_required=True):
     group = parser.add_argument_group(group_name)
     for arg_name, arg_val in arg_group.items():
-        arg_type, default, required, description, _ = arg_val
+        arg_type, default, required, description = arg_val
         arg_type = str_to_bool if arg_type == bool else arg_type
         required = required if check_required else False
         group.add_argument(f"--{arg_name}", type=arg_type, help=description, default=default, required=required)
