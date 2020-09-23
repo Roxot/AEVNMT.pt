@@ -45,7 +45,7 @@ def _draw_translations(model, val_dl, vocab_src, vocab_tgt, device, hparams):
 
 
 def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
-    if hparams.lm.style == "rnn":
+    if hparams.gen.lm.style == "rnn":
         language_model = CorrelatedCategoricalsLM(
             embedder=src_embedder,
             sos_idx=vocab_src[SOS_TOKEN],
@@ -59,7 +59,7 @@ def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
             feed_z=hparams.gen.lm.feed_z,
             gate_z=False  # TODO implement
         )
-    elif hparams.lm.style == "transformer":
+    elif hparams.gen.lm.style == "transformer":
         language_model = TransformerLM(
             embedder=src_embedder,
             sos_idx=vocab_src[SOS_TOKEN],
@@ -70,7 +70,7 @@ def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
             num_layers=hparams.gen.lm.transformer.num_layers,
             dropout=hparams.dropout,
             tied_embeddings=hparams.gen.lm.tied_embeddings,
-            feed_z_method="first" if gen.lm.feed_z else "none"
+            feed_z_method="first" if hparams.gen.lm.feed_z else "none"
         )
     else:
         raise NotImplementedError(f"Unknown language model style: {hparams.lm.style}")
@@ -499,11 +499,11 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
             encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
             hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
 
-        if hparams.dec.sample:
+        if hparams.decoding.sample:
             raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
                max_len=hparams.decoding.max_length, greedy=False)
 
-        elif hparams.beam_width <= 1:
+        elif hparams.decoding.beam_width <= 1:
             raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
                max_len=hparams.decoding.max_length, greedy=True)
 

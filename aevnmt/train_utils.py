@@ -67,7 +67,8 @@ def load_vocabularies(hparams):
     if hparams.vocab.prefix is not None:
 
         if hparams.vocab.shared:
-            vocab = Vocabulary.from_file(hparams.vocab.prefix, max_size=hparams.vocab.max_size)
+            vocab_file = f"{hparams.vocab.prefix}.{hparams.src}"
+            vocab = Vocabulary.from_file(vocab_file, max_size=hparams.vocab.max_size)
             vocab_src = vocab
             vocab_tgt = vocab
         else:
@@ -138,7 +139,7 @@ def create_decoder(attention, hparams):
                             cell_type=hparams.gen.tm.rnn.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
                             feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
-    elif hparams.dec.style == "transformer":
+    elif hparams.gen.tm.dec.style == "transformer":
         return TransformerDecoder(
             input_size=hparams.emb.size,
             hidden_size=hparams.gen.tm.transformer.hidden_size,

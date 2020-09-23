@@ -163,7 +163,7 @@ class TransformerEncoderX(InferenceEncoder):
             num_layers=num_layers,
             dropout=dropout)
         self.hidden_size = hidden_size
-        self.output_size = hidden_size
+        self.output_size = embedder.embedding_dim
         self.composition = composition
 
     def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
