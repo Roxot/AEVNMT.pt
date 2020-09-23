@@ -26,7 +26,7 @@ class TranslationEngine:
         verbose = hparams.verbose
 
         if hparams.vocab.prefix is None:
-            hparams.vocab.prefix = output_dir / "vocab"
+            hparams.vocab.prefix = str(output_dir / "vocab")
             hparams.vocab.shared = False
 
         # Select the correct device (GPU or CPU).
@@ -247,11 +247,13 @@ class TranslationEngine:
 def main(hparams=None):
     # Load command line hyperparameters (and if provided from an hparams_file).
     if hparams is None:
+        if "--hparams_file" not in sys.argv:
+            # TODO This is added to prevent incorrect overriding of arguments, see Issue #14
+            # When resolved, hparams.update_from_file can be used instead.
+            output_dir = Path(sys.argv[sys.argv.index("--output_dir") + 1])
+            hparams_file = str(output_dir / "hparams")
+            sys.argv = [sys.argv[0]] + ['--hparams_file', hparams_file] + sys.argv[1:]
         hparams = Hyperparameters(check_required=False)
-        # Fill in any missing values from the hparams file in the output_dir.
-        output_dir = Path(hparams.output_dir)
-        hparams_file = output_dir / "hparams"
-        hparams.update_from_file(hparams_file, override=False)
 
     engine = TranslationEngine(hparams)
 

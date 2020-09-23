@@ -17,9 +17,9 @@ class AEVNMT(nn.Module):
 
     def __init__(self, latent_size, src_embedder, tgt_embedder, 
             language_model: GenerativeLM, translation_model: GenerativeTM, inference_model: InferenceModel,
-            prior: PriorLayer, 
+            prior: PriorLayer,
             dropout, tied_embeddings,
-            feed_z=False,  
+            feed_z=False,
             mdr=-1.,
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):

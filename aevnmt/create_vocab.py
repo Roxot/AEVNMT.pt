@@ -31,7 +31,7 @@ def create_vocab():
     print(f"\nSaving vocabularies to {out_dir}...")
     vocab_src.save(out_dir / f"vocab.{hparams.src}")
     vocab_tgt.save(out_dir / f"vocab.{hparams.tgt}")
-    hparams.vocab.prefix = out_dir / "vocab"
+    hparams.vocab.prefix = str(out_dir / "vocab")
 
 if __name__ == "__main__":
     create_vocab()
