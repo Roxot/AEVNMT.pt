@@ -142,7 +142,7 @@ def beam_search_rnn(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden,
                 topk_log_probs = topk_scores * length_penalty
 
             # reconstruct beam origin and true word ids from flattened order
-            if version.parse(torch.__version__) >= version.parse('1.3.0'):
+            if version.parse(torch.__version__) >= version.parse('1.5.0'):
                 topk_beam_index = topk_ids.floor_divide(tgt_vocab_size)
             else:
                 topk_beam_index = topk_ids.div(tgt_vocab_size)
@@ -332,7 +332,7 @@ def beam_search_transformer(
                 topk_log_probs = topk_scores * length_penalty
 
             # reconstruct beam origin and true word ids from flattened order
-            if version.parse(torch.__version__) >= version.parse('1.3.0'):
+            if version.parse(torch.__version__) >= version.parse('1.5.0'):
                 topk_beam_index = topk_ids.floor_divide(tgt_vocab_size)
             else:
                 topk_beam_index = topk_ids.div(tgt_vocab_size)
