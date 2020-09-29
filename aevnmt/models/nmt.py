@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from aevnmt.components import label_smoothing_loss
+from torch.distributions import Categorical
 
 
 class ConditionalNMT(nn.Module):
@@ -70,7 +72,7 @@ class ConditionalNMT(nn.Module):
 
         return torch.cat(outputs, dim=1), torch.cat(all_att_weights, dim=1)
 
-    def loss(self, logits, targets, reduction):
+    def loss(self, logits, targets, reduction, label_smoothing=0.):
         """
         Computes the negative categorical log-likelihood for the given model output.
 
@@ -80,10 +82,15 @@ class ConditionalNMT(nn.Module):
         """
 
         # Compute the loss for each batch element. Logits are of the form [B, T, vocab_size],
-        # whereas the cross-entropy function wants a loss of the form [B, vocab_svocab_sizee, T].
-        logits = logits.permute(0, 2, 1)
-        loss = F.cross_entropy(logits, targets, ignore_index=self.pad_idx, reduction="none")
-        loss = loss.sum(dim=1)
+        # whereas the cross-entropy function wants a loss of the form [B, vocab_size, T].
+        log_likelihood = - F.cross_entropy(logits.permute(0, 2, 1), targets, ignore_index=self.pad_idx, reduction="none")
+        if label_smoothing > 0:
+            # TODO Switch condnmt to the same loss as aevnmt (with torch.distributions).
+            likelihood = Categorical(logits=logits)
+            smooth_loss = label_smoothing_loss(likelihood, targets,
+                                               ignore_index=self.pad_idx)
+            log_likelihood = (1-label_smoothing) * log_likelihood + label_smoothing * smooth_loss
+        loss = - log_likelihood.sum(dim=-1)
 
         if reduction == "mean":
             loss = loss.mean()

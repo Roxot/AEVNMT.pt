@@ -378,6 +378,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       free_nats=hparams.kl.free_nats,
                       KL_weight=KL_weight,
                       reduction="mean",
+                      smoothing_x=hparams.gen.lm.label_smoothing,
+                      smoothing_y=hparams.gen.tm.label_smoothing,
                       aux_lm_likelihoods=aux_lm_likelihoods,
                       aux_tm_likelihoods=aux_tm_likelihoods,
                       loss_cfg=loss_cfg)

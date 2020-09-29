@@ -106,6 +106,7 @@ inf_args = {
 tm_args = {
     # NOTE: For now encoder and decoder share the same transformer/rnn params,
     # since many configurations with split params are not supported.
+    "gen.tm.label_smoothing": (float, 0., False, "The label smoothing applied to TM likelihood"),
     "gen.tm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the tm transformer"),
     "gen.tm.transformer.num_layers": (int, 4, False, "The number of tm transformer layers"),
     "gen.tm.transformer.num_heads": (int, 8, False, "The number of tm transformer heads"),
@@ -121,6 +122,7 @@ tm_args = {
 }
 
 lm_args = {
+    "gen.lm.label_smoothing": (float, 0., False, "The label smoothing applied to LM likelihood"),
     "gen.lm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the lm transformer"),
     "gen.lm.transformer.num_layers": (int, 4, False, "The number of lm transformer layers"),
     "gen.lm.transformer.num_heads": (int, 8, False, "The number of lm transformer heads"),

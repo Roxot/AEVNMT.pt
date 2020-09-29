@@ -26,7 +26,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
                hparams, step, summary_writer=None):
     logits, _ = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in)
-    loss = model.loss(logits, y_out, reduction="mean")
+    loss = model.loss(logits, y_out, reduction="mean", label_smoothing=hparams.gen.tm.label_smoothing)
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, summary_writer=None):
