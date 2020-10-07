@@ -39,7 +39,7 @@ class ConditionalNMT(nn.Module):
             smooth_loss = label_smoothing_loss(likelihood, targets,
                                                ignore_index=self.pad_idx)
             log_likelihood = (1-label_smoothing) * log_likelihood + label_smoothing * smooth_loss
-        loss = - log_likelihood.sum(dim=-1)
+        loss = - log_likelihood
 
         if reduction == "mean":
             loss = loss.mean()
