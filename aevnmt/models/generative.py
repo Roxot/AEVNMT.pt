@@ -563,9 +563,7 @@ class IBM1TM(GenerativeTM):
 class AttentionBasedTM(GenerativeTM):
 
     def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
-            encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
-        # TODO Currently, if latent_size == 0, the model does not condition on latent_size (for NMT).
-        # Change feed_z like in TransformerTM so it has this functionality (for example: feed_z_method=['enc_init', 'dec_init', 'cat'])
+            encoder, decoder, latent_size, dropout, feed_z_method, tied_embeddings):
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
@@ -579,12 +577,14 @@ class AttentionBasedTM(GenerativeTM):
             self.output_matrix = nn.Parameter(torch.randn(tgt_embedder.num_embeddings, decoder.hidden_size))
         self.dropout_layer = nn.Dropout(p=dropout)
 
-        self.feed_z = feed_z
-        self.latent_size = latent_size
-        if latent_size > 0:
+        for method in feed_z_method:
+            assert method in ["init_encoder", "init_decoder", "cat"], f"Unknown feed_z_method: {method}"
+        self.feed_z_method = feed_z_method
+        if "init_encoder" in self.feed_z_method:
             self.encoder_init_layer = nn.Sequential(
                 nn.Linear(latent_size, encoder.hidden_size),
                 nn.Tanh())
+        if "init_decoder" in self.feed_z_method:
             self.decoder_init_layer = nn.Sequential(
                 nn.Linear(latent_size, decoder.hidden_size),
                 nn.Tanh())
@@ -600,7 +600,7 @@ class AttentionBasedTM(GenerativeTM):
         return y_embed
 
     def init_decoder(self, encoder_outputs, encoder_final, z):
-        if self.latent_size:
+        if "init_decoder" in self.feed_z_method:
             self.decoder.init_decoder(encoder_outputs, encoder_final)
             hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
         else:
@@ -609,7 +609,7 @@ class AttentionBasedTM(GenerativeTM):
 
     def encode(self, x, seq_len_x, z):
         x_embed = self.src_embed(x)
-        if self.latent_size:
+        if "init_encoder" in self.feed_z_method:
             hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
         else:
             hidden = None
@@ -628,11 +628,12 @@ class AttentionBasedTM(GenerativeTM):
         tm_logits = []
         all_att_weights = []
         max_time = y.size(1)
+        feed_z = "cat" in self.feed_z_method
         for t in range(max_time):
             prev_y = y[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, att_weights = self.decoder.step(
-                y_embed, hidden, seq_mask_x, encoder_outputs, z=z if self.feed_z else None)
+                y_embed, hidden, seq_mask_x, encoder_outputs, z=z if feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
@@ -654,10 +655,11 @@ class AttentionBasedTM(GenerativeTM):
         predictions = []
         log_probs = []
         is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
+        feed_z = "cat" in self.feed_z_method
         for t in range(max_len):
             prev_y = self.tgt_embedder(prev_y)
             pre_output, hidden, _ = self.decoder.step(
-                prev_y, hidden, seq_mask_x, encoder_outputs, z=z if self.feed_z else None)
+                prev_y, hidden, seq_mask_x, encoder_outputs, z=z if feed_z else None)
             logits = self.generate(pre_output)
             py_xz = Categorical(logits=logits)
             if greedy:
@@ -681,7 +683,7 @@ class TransformerTM(GenerativeTM):
 
     def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
                  encoder, decoder, latent_size, dropout, tied_embeddings,
-                 feed_z_method="first"):
+                 feed_z_method=["first"]):
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
@@ -696,12 +698,13 @@ class TransformerTM(GenerativeTM):
             self.output_matrix = self.tgt_embedder.weight
         self.dropout_layer = nn.Dropout(p=dropout)
 
-        # For future experiments, different methods of adding z into the transformer.
-        assert feed_z_method in ['first', 'none'], "Unknown feed_z_method: {}".format(feed_z_method)
+        for method in feed_z_method:
+            assert method in ['first'], f"Unknown feed_z_method: {method}"
         self.feed_z_method = feed_z_method
 
-        self.fc_z_enc = nn.Linear(latent_size, src_embedder.embedding_dim)
-        self.fc_z_dec = nn.Linear(latent_size, tgt_embedder.embedding_dim)
+        if "first" in self.feed_z_method:
+            self.fc_z_enc = nn.Linear(latent_size, src_embedder.embedding_dim)
+            self.fc_z_dec = nn.Linear(latent_size, tgt_embedder.embedding_dim)
 
         # A function alias to clean up beam search code.
         self.tgt_embed = self.prepare_decoder_input
@@ -712,14 +715,10 @@ class TransformerTM(GenerativeTM):
         """
         y_emb = self.tgt_embedder(y) # [B, T, D]
 
-        if self.feed_z_method == "first":
+        if "first" in self.feed_z_method:
             # Add z as first decoder input, encoder outputs stay the same.
             z_dec = self.fc_z_dec(z) # [B, D]
             y_emb = torch.cat([z_dec.unsqueeze(1), y_emb], 1) # [B, T+1, D]
-        elif self.feed_z_method == "none":
-            pass
-        else:
-            raise NotImplementedError()
 
         return y_emb, encoder_out, seq_len_x
 
@@ -729,16 +728,12 @@ class TransformerTM(GenerativeTM):
         """
         x_emb = self.src_embedder(x) # [B, T, D]
 
-        if self.feed_z_method == "first":
+        if "first" in self.feed_z_method:
             # Add z as first encoder input. to both encoder and decoder inputs.
             z_enc = self.fc_z_enc(z) # [B, D]
             x_emb = torch.cat([z_enc.unsqueeze(1), x_emb], 1) # [B, T+1, D]
             # Sequences get 1 longer.
             seq_len_x = seq_len_x.clone() + 1
-        elif self.feed_z_method == "none":
-            pass
-        else:
-            raise NotImplementedError()
 
         return x_emb, seq_len_x
 
@@ -757,7 +752,7 @@ class TransformerTM(GenerativeTM):
         decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
         logits = self.generate(decoder_out)
 
-        if self.feed_z_method == "first":
+        if "first" in self.feed_z_method:
             # Omit first output, since first input is z instead of start token.
             logits = logits[:, 1:]
 
@@ -774,7 +769,7 @@ class TransformerTM(GenerativeTM):
         return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
     
     def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
-        encoder_out, seq_len_x = self.encoder(x_emb, seq_len_x, z)
+        encoder_out, seq_len_x = self.encode(x, seq_len_x, z)
         batch_size = x.size(0)
         prev_y = torch.full(size=[batch_size, 1], fill_value=self.tgt_sos_idx, dtype=torch.long, device=x.device)
 
@@ -813,7 +808,7 @@ class TransformerLM(GenerativeLM):
     """
 
     def __init__(self, embedder, sos_idx, eos_idx, latent_size, hidden_size, 
-                 num_heads, num_layers, dropout, tied_embeddings, feed_z_method="first"):
+                 num_heads, num_layers, dropout, tied_embeddings, feed_z_method=["first"]):
         super().__init__()
         self.embedder = embedder
         self. pad_idx = embedder.padding_idx
@@ -830,10 +825,12 @@ class TransformerLM(GenerativeLM):
         self.dropout_layer = nn.Dropout(p=dropout)
 
         # For future experiments, different methods of adding z into the transformer.
-        assert feed_z_method in ['first', 'none'], "Unknown feed_z_method: {}".format(feed_z_method)
+        for method in feed_z_method:
+            assert method in ['first'], f"Unknown feed_z_method: {method}"
         self.feed_z_method = feed_z_method
 
-        self.fc_z = nn.Linear(latent_size, embedder.embedding_dim)
+        if 'first' in self.feed_z_method:
+            self.fc_z = nn.Linear(latent_size, embedder.embedding_dim)
 
     
     def prepare_input(self, x, z):
@@ -842,15 +839,11 @@ class TransformerLM(GenerativeLM):
         """
 
         x_emb = self.embedder(x) # [B, T, D]
-        z_emb = self.fc_z(z) # [B, D]
 
-        if self.feed_z_method == "first":
+        if "first" in self.feed_z_method:
             # Add z as first input to transformer.
+            z_emb = self.fc_z(z) # [B, D]
             x_emb = torch.cat([z_emb.unsqueeze(1), x_emb], 1) # [B, T+1, D]
-        elif self.feed_z_method == "none":
-            pass
-        else:
-            raise NotImplementedError()
 
         return x_emb
 
@@ -866,7 +859,7 @@ class TransformerLM(GenerativeLM):
         x_emb = self.prepare_input(x, z)
         hidden, _ = self.transformer(x_emb)
 
-        if self.feed_z_method == "first":
+        if "first" in self.feed_z_method:
             hidden = hidden[:, 1:]
         logits = F.linear(hidden, self.output_matrix)
 

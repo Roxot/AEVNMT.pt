@@ -29,7 +29,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
             latent_size=0,
             dropout=hparams.dropout,
             tied_embeddings=hparams.gen.tm.dec.tied_embeddings,
-            feed_z_method="none"
+            feed_z_method=[]
         )
     elif (hparams.gen.tm.enc.style == 'transformer') ^ (hparams.gen.tm.dec.style == 'transformer'):
         raise NotImplementedError("When using a transformer TM, both encoder and decoder have to be transformer")
@@ -43,7 +43,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
             decoder=decoder,
             latent_size=0,
             dropout=hparams.dropout,
-            feed_z=False,
+            feed_z_method=[],
             tied_embeddings=hparams.gen.tm.dec.tied_embeddings
         )
 

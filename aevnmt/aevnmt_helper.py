@@ -22,6 +22,7 @@ from aevnmt.models.generative import CorrelatedPoissonsTM, IBM1TM, AttentionBase
 from aevnmt.models.generative import TransformerLM, TransformerTM
 from aevnmt.models.inference import InferenceModel, BasicInferenceModel, SwitchingInferenceModel
 from aevnmt.models.inference import get_inference_encoder, combine_inference_encoders
+from aevnmt.models.parallel import ParallelWrapper
 from aevnmt.dist import get_named_params, create_prior
 from aevnmt.dist import ProductOfPriorsLayer, ProductOfConditionalsLayer
 from aevnmt.dist import NormalLayer, KumaraswamyLayer, HardKumaraswamyLayer
@@ -70,7 +71,7 @@ def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
             num_layers=hparams.gen.lm.transformer.num_layers,
             dropout=hparams.dropout,
             tied_embeddings=hparams.gen.lm.tied_embeddings,
-            feed_z_method="first" if hparams.gen.lm.feed_z else "none"
+            feed_z_method=["first"] if hparams.gen.lm.feed_z else []
         )
     else:
         raise NotImplementedError(f"Unknown language model style: {hparams.lm.style}")
@@ -121,11 +122,14 @@ def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
             latent_size=hparams.prior.latent_size,
             dropout=hparams.dropout,
             tied_embeddings=hparams.gen.tm.dec.tied_embeddings,
-            feed_z_method="first" if hparams.gen.tm.dec.feed_z else "none"
+            feed_z_method=["first"]
         )
     elif (hparams.gen.tm.enc.style == 'transformer') ^ (hparams.gen.tm.dec.style == 'transformer'):
         raise NotImplementedError("When using a transformer TM, both encoder and decoder have to be transformer")
     else:
+        feed_z_method = ['init_encoder', 'init_decoder']
+        if hparams.gen.tm.dec.feed_z:
+            feed_z_method.append('cat')
         translation_model = AttentionBasedTM(
             src_embedder=src_embedder,
             tgt_embedder=tgt_embedder,
@@ -135,7 +139,7 @@ def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
             decoder=decoder,
             latent_size=hparams.prior.latent_size,
             dropout=hparams.dropout,
-            feed_z=hparams.gen.tm.dec.feed_z,
+            feed_z_method=feed_z_method,
             tied_embeddings=hparams.gen.tm.dec.tied_embeddings
         )
 
@@ -399,6 +403,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title='xy', summary_writer=None):
+    if isinstance(model, ParallelWrapper):
+        model = model.module.model
     model.eval()
 
     # Create the validation dataloader. We can just bucket.
@@ -520,7 +526,7 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
                 vocab_tgt[PAD_TOKEN], hparams.decoding.beam_width,
                 hparams.decoding.length_penalty_factor,
                 hparams.decoding.max_length,
-                z if hparams.gen.tm.dec.feed_z else None)
+                z)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis

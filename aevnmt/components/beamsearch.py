@@ -117,7 +117,7 @@ def beam_search_rnn(decoder, tgt_embed_fn, generator_fn, tgt_vocab_size, hidden,
             # expand current hypotheses, decode one single step
             if luong_decoding: hidden = (hidden, prev_pre_output)
             prev_y = tgt_embed_fn(prev_y)
-            pre_output, hidden, _ = decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs,z)
+            pre_output, hidden, _ = decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs, z)
             logits = generator_fn(pre_output)
             if luong_decoding: hidden, prev_pre_output = hidden
             log_probs = F.log_softmax(logits, dim=-1).squeeze(1)  # [B*beam_width, |V_y|]

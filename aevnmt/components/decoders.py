@@ -86,6 +86,9 @@ class BahdanauDecoder(nn.Module):
         """
         Does teacher forcing. Unrolls entire RNN.
         """
+        # For DataParallel, we need to make parameters continguous
+        self.rnn.flatten_parameters()
+
         if self.init_from_encoder_final:
             hidden = self.init_decoder(encoder_outputs, encoder_final)
         else:
@@ -193,6 +196,9 @@ class LuongDecoder(nn.Module):
         """
         Does teacher forcing. Unrolls entire RNN.
         """
+        # For DataParallel, we need to make parameters continguous
+        self.rnn.flatten_parameters()
+
         if self.init_from_encoder_final:
             hidden = self.init_decoder(encoder_outputs, encoder_final)
         else:

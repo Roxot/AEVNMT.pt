@@ -47,6 +47,7 @@ io_args = {
     "src": (str, None, True, "The source language"),
     "tgt": (str, None, True, "The target language"),
     "use_gpu": (bool, False, False, "Whether to use the GPU or not"),
+    "data_parallel": (bool, False, False, "Train on multi-gpu with DataParallel."),
     "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
     "output_dir": (str, None, True, "Output directory."),
     "subword_token": (str, None, False, "The subword token, e.g. \"@@\"."),

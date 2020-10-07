@@ -147,7 +147,6 @@ class AEVNMT(nn.Module):
         if smoothing_y > 0:
             tm_smooth_loss = label_smoothing_loss(tm_likelihood, targets_y,
                                                   ignore_index=self.translation_model.tgt_embedder.padding_idx)
-            print("s", tm_smooth_loss.mean())
             tm_log_likelihood = (1 - smoothing_y) * tm_log_likelihood + smoothing_y * tm_smooth_loss
         tm_loss = - tm_log_likelihood
 

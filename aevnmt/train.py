@@ -16,8 +16,11 @@ from aevnmt.data import BucketingParallelDataLoader
 from aevnmt.data import PAD_TOKEN
 from aevnmt.data.utils import create_noisy_batch
 from aevnmt.models import initialize_model
-
+from aevnmt.models.parallel import ParallelWrapper, ParallelAEVNMT, aevnmt_train_parallel
 from aevnmt.opt_utils import construct_optimizers, lr_scheduler_step
+
+import warnings
+warnings.simplefilter(action='ignore', category=UserWarning)
 
 
 def create_model(hparams, vocab_src, vocab_tgt):
@@ -28,7 +31,10 @@ def create_model(hparams, vocab_src, vocab_tgt):
         translate_fn = nmt_helper.translate
     elif hparams.model.type == "aevnmt":
         model = aevnmt_helper.create_model(hparams, vocab_src, vocab_tgt)
-        train_fn = aevnmt_helper.train_step
+        if hparams.data_parallel:
+            train_fn = aevnmt_train_parallel
+        else:
+            train_fn = aevnmt_helper.train_step
         validate_fn = aevnmt_helper.validate
         translate_fn = aevnmt_helper.translate
     else:
@@ -153,6 +159,7 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                        f"{displaying} -- "
                        f"{tokens_per_sec:,.0f} tokens/s -- "
                        f"gradient norm = {grad_norm:.2f}")
+                       
                 summary_writer.add_scalar("train/loss",
                                           total_train_loss/num_sentences, step)
                 num_tokens = 0
@@ -218,6 +225,9 @@ def main():
 
     # Create the language model and load it onto the GPU if set to do so.
     model, train_fn, validate_fn, _ = create_model(hparams, vocab_src, vocab_tgt)
+    if hparams.data_parallel:
+        model = ParallelAEVNMT(model, hparams)
+        model = ParallelWrapper(model)
     optimizers, lr_schedulers = construct_optimizers(
         hparams,
         gen_parameters=model.generative_parameters(),
