@@ -562,8 +562,10 @@ class IBM1TM(GenerativeTM):
 
 class AttentionBasedTM(GenerativeTM):
 
-    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx, 
+    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
             encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
+        # TODO Currently, if latent_size == 0, the model does not condition on latent_size (for NMT).
+        # Change feed_z like in TransformerTM so it has this functionality (for example: feed_z_method=['enc_init', 'dec_init', 'cat'])
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
@@ -571,17 +573,21 @@ class AttentionBasedTM(GenerativeTM):
         self.tgt_eos_idx = tgt_eos_idx
         self.encoder = encoder
         self.decoder = decoder
-        self.encoder_init_layer = nn.Sequential(
-            nn.Linear(latent_size, encoder.hidden_size),
-            nn.Tanh())
-        self.decoder_init_layer = nn.Sequential(
-            nn.Linear(latent_size, decoder.hidden_size),
-            nn.Tanh())
+        
         self.tied_embeddings = tied_embeddings
         if not tied_embeddings:
             self.output_matrix = nn.Parameter(torch.randn(tgt_embedder.num_embeddings, decoder.hidden_size))
         self.dropout_layer = nn.Dropout(p=dropout)
+
         self.feed_z = feed_z
+        self.latent_size = latent_size
+        if latent_size > 0:
+            self.encoder_init_layer = nn.Sequential(
+                nn.Linear(latent_size, encoder.hidden_size),
+                nn.Tanh())
+            self.decoder_init_layer = nn.Sequential(
+                nn.Linear(latent_size, decoder.hidden_size),
+                nn.Tanh())
     
     def src_embed(self, x):
         x_embed = self.src_embedder(x)
@@ -594,13 +600,19 @@ class AttentionBasedTM(GenerativeTM):
         return y_embed
 
     def init_decoder(self, encoder_outputs, encoder_final, z):
-        self.decoder.init_decoder(encoder_outputs, encoder_final)
-        hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
+        if self.latent_size:
+            self.decoder.init_decoder(encoder_outputs, encoder_final)
+            hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
+        else:
+            hidden = self.decoder.init_decoder(encoder_outputs, encoder_final)
         return hidden
 
     def encode(self, x, seq_len_x, z):
         x_embed = self.src_embed(x)
-        hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
+        if self.latent_size:
+            hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
+        else:
+            hidden = None
         return self.encoder(x_embed, seq_len_x, hidden=hidden)
 
     def generate(self, pre_output):
@@ -644,7 +656,8 @@ class AttentionBasedTM(GenerativeTM):
         is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
         for t in range(max_len):
             prev_y = self.tgt_embedder(prev_y)
-            pre_output, hidden, _ = self.decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs, z)
+            pre_output, hidden, _ = self.decoder.step(
+                prev_y, hidden, seq_mask_x, encoder_outputs, z=z if self.feed_z else None)
             logits = self.generate(pre_output)
             py_xz = Categorical(logits=logits)
             if greedy:
@@ -667,7 +680,7 @@ class TransformerTM(GenerativeTM):
     """
 
     def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
-                 encoder, decoder, latent_size, dropout, tied_embeddings, 
+                 encoder, decoder, latent_size, dropout, tied_embeddings,
                  feed_z_method="first"):
         super().__init__()
         self.src_embedder = src_embedder
