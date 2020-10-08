@@ -388,7 +388,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       aux_tm_likelihoods=aux_tm_likelihoods,
                       loss_cfg=loss_cfg)
 
-    if summary_writer:
+    if summary_writer and step % hparams.print_every == 0:
         summary_writer.add_histogram("posterior/z", z, step)
         for param_name, param_value in get_named_params(qz):
             summary_writer.add_histogram("posterior/%s" % param_name, param_value, step)
