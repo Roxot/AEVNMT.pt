@@ -3,7 +3,7 @@ import torch.nn as nn
 from functools import partial
 from itertools import tee
 
-from aevnmt.components import NoamScheduler
+from aevnmt.components import NoamScheduler, ConstraintOptimizer
 
 class RequiresGradSwitch:
     """
@@ -110,11 +110,10 @@ def construct_optimizers(hparams, gen_parameters, inf_z_parameters, lagrangian_p
 
 
     if lagrangian_parameters is not None:
-        optimizers["lagrangian"] = get_optimizer(
-            "adam",
+        optimizers["lagrangian"] = ConstraintOptimizer(
+            optim.RMSprop,
             lagrangian_parameters,
             hparams.gen.opt.lr,
-            0.
         )
 
     return optimizers, lr_schedulers

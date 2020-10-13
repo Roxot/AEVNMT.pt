@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical 
 
 from aevnmt.dist import PriorLayer, get_named_params
-from aevnmt.components import label_smoothing_loss
+from aevnmt.components import label_smoothing_loss, MDRConstraint
 
 from .generative import GenerativeLM, GenerativeTM
 from .inference import InferenceModel
@@ -39,8 +39,8 @@ class AEVNMT(nn.Module):
         self.aux_tms = nn.ModuleDict(aux_tms)
 
         self.mdr = mdr
-        if mdr > 0.:
-            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([1.]))
+        if self.mdr > 0.:
+            self.mdr_constraint = MDRConstraint(self.mdr)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -70,9 +70,8 @@ class AEVNMT(nn.Module):
    
     def lagrangian_parameters(self):
         if self.mdr > 0.:
-            return [self.mdr_lag_weight]
-        else:
-            return None
+            return self.mdr_constraint.parameters()
+        return None
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
@@ -237,8 +236,9 @@ class AEVNMT(nn.Module):
 
         # Add MDR constraint.
         if self.mdr > 0.:
-            constraint = self.mdr_lag_weight * (self.mdr - KL.mean()) 
-            loss = loss + constraint
+            mdr_loss = self.mdr_constraint(KL)
+            out_dict['c'] = self.mdr_constraint.multiplier.detach()
+            loss = loss + mdr_loss
 
         # Return differently according to the reduction setting.
         if reduction == "mean":

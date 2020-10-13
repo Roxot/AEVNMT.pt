@@ -1,10 +1,6 @@
 """
 Implementation Notes
 
-- TODO Integrate transformer parts into aevnmt model.
-- TODO better filenames, components.transformer and models.transformer is confusing.
-- TODO Check huggingface for more tricks, might need their optimizers for the lr scheduling etc.
-- TODO Is layernorm needed? look at literature, might be detrimental.
 - TODO feed_z_method for both the GenerativeLM and GenerativeTM needs testing. Options:
     - z is x_{0} (Current method, feed_z_method="first")
     - x_i -> [z, x_i]: where x_i is the embedding of the ith token in the history

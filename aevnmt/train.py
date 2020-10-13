@@ -124,11 +124,6 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             optimizers["gen"].step()
             if "inf_z" in optimizers: optimizers["inf_z"].step()
             if "lagrangian" in optimizers:
-                # We are doing maximization for this parameter group rather than minimization. Thus we
-                # invert the direction of the gradients.
-                for group in optimizers["lagrangian"].param_groups:
-                    for p in group["params"]:
-                        p.grad = -1 * p.grad
                 optimizers["lagrangian"].step()
 
             # Update statistics.
@@ -154,6 +149,8 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 for comp_name, comp_value in sorted(return_dict.items()):
                     if comp_name.startswith('tm/'):
                         displaying += f" -- {comp_name} = {-comp_value.mean().item():,.2f}"
+                if 'c' in return_dict:
+                    displaying += f"c = {return_dict['c'].mean().item():,.2f}"
                 print(f"({epoch_num}) step {step}: "
                        f"training loss = {total_train_loss/num_sentences:,.2f} -- "
                        f"{displaying} -- "

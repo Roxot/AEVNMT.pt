@@ -9,9 +9,10 @@ from .search import greedy_decode, sampling_decode, ancestral_sample
 from .beamsearch import beam_search
 from .lrschedulers import NoamScheduler
 from .loss_functions import label_smoothing_loss
+from .constraints import MDRConstraint, ConstraintOptimizer
 
 __all__ = ["BahdanauDecoder", "LuongDecoder", "RNNEncoder", "rnn_creation_fn",
           "BahdanauAttention", "LuongAttention", "greedy_decode", "sampling_decode", "beam_search",
           "tile_rnn_hidden", "tile_rnn_hidden_for_decoder", "ancestral_sample", "TransformerEncoder", "TransformerDecoder",
           "TransformerCompositionFunction", "NoamScheduler", "DecomposableAttentionEncoder", "DetachedEmbeddingLayer",
-          "label_smoothing_loss"]
+          "label_smoothing_loss", "MDRConstraint", "ConstraintOptimizer"]
