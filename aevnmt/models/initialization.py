@@ -34,10 +34,20 @@ def initialize_model(model, pad_idx, cell_type, emb_init_scale, verbose=False):
     with torch.no_grad():
         for name, param in model.named_parameters():
 
-            # Use default initialization for the transformer.
+            # Use Fairseq initialization for Transformer
+            # Source: https://github.com/pytorch/fairseq/blob/master/fairseq/modules/multihead_attention.py
             if "transformer" in name:
-                if verbose:
-                    print(f"Using default initialization for {name}")
+                if "attn.in_proj_weight" in name:
+                    if verbose:
+                        print(f"Initializing {name} with xavier_uniform(gain=1/sqrt(2))")
+                    nn.init.xavier_uniform_(param, gain=1 / math.sqrt(2))
+                elif "attn.out_proj.weight" in name:
+                    if verbose:
+                        print(f"Initializing {name} with xavier_uniform(gain={xavier_gain})")
+                    nn.init.xavier_uniform_(param)
+                else:
+                    if verbose:
+                        print(f"Using default initialization for {name}")
 
             # Initialize embeddings from a 0-mean Gaussian with scale emb_init_scale.
             elif "embedder" in name:
