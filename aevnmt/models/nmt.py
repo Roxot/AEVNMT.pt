@@ -38,9 +38,7 @@ class ConditionalNMT(nn.Module):
         if label_smoothing > 0:
             smooth_loss = label_smoothing_loss(likelihood, targets,
                                                ignore_index=self.translation_model.tgt_embedder.padding_idx)
-            print(log_likelihood.shape, smooth_loss.shape)
-            assert False
-            log_likelihood = (1-label_smoothing) * log_likelihood + label_smoothing * smooth_loss.sum(-1)
+            log_likelihood = (1 - label_smoothing) * log_likelihood + label_smoothing * smooth_loss.sum(-1)
         loss = - log_likelihood
 
         if reduction == "mean":
