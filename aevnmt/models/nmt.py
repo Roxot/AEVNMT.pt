@@ -37,7 +37,7 @@ class ConditionalNMT(nn.Module):
         log_likelihood = self.translation_model.log_prob(likelihood, targets)
         if label_smoothing > 0:
             smooth_loss = label_smoothing_loss(likelihood, targets,
-                                               ignore_index=self.pad_idx)
+                                               ignore_index=self.translation_model.tgt_embedder.padding_idx)
             log_likelihood = (1-label_smoothing) * log_likelihood + label_smoothing * smooth_loss
         loss = - log_likelihood
 
