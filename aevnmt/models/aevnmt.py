@@ -144,9 +144,8 @@ class AEVNMT(nn.Module):
         # [B]
         tm_log_likelihood = self.translation_model.log_prob(tm_likelihood, targets_y)
         if smoothing_y > 0:
-            tm_smooth_loss = label_smoothing_loss(tm_likelihood, targets_y,
-                                                  ignore_index=self.translation_model.tgt_embedder.padding_idx)
-            tm_log_likelihood = (1 - smoothing_y) * tm_log_likelihood + smoothing_y * tm_smooth_loss
+            tm_smooth_loss = label_smoothing_loss(tm_likelihood, targets_y, ignore_index=self.translation_model.tgt_embedder.padding_idx)
+            tm_log_likelihood = (1 - smoothing_y) * tm_log_likelihood + smoothing_y * tm_smooth_loss.sum(-1)
         tm_loss = - tm_log_likelihood
 
         # [B]
@@ -154,7 +153,7 @@ class AEVNMT(nn.Module):
         if smoothing_x > 0:
             lm_smooth_loss = label_smoothing_loss(lm_likelihood, targets_x,
                                                   ignore_index=self.language_model.pad_idx)
-            lm_log_likelihood = (1 - smoothing_x) * lm_log_likelihood + smoothing_x * lm_smooth_loss
+            lm_log_likelihood = (1 - smoothing_x) * lm_log_likelihood + smoothing_x * lm_smooth_loss.sum(-1)
         lm_loss = - lm_log_likelihood
 
         # Compute the KL divergence between the distribution used to sample z, and the prior

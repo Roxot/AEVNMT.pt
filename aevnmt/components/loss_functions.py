@@ -13,9 +13,9 @@ def label_smoothing_loss(likelihood: Categorical, target, ignore_index=None):
     :param target: Target labels
     :param ignore_index: This index from target is not included in the loss, defaults to None
     """
-    smooth_loss = torch.log(likelihood.probs).sum(-1)
+    smooth_loss = likelihood.logits.sum(-1)
     if ignore_index is not None:
         pad_mask = target.eq(ignore_index)
         smooth_loss.masked_fill_(pad_mask, 0.)
-    smooth_loss = (smooth_loss / likelihood.probs.size(-1)).sum(-1)
+    smooth_loss = (smooth_loss / likelihood.probs.size(-1))
     return smooth_loss
