@@ -16,6 +16,8 @@ from .rnnlm import RNNLM
 
 from aevnmt.components.nibm1 import NeuralIBM1
 from aevnmt.components import tile_rnn_hidden, rnn_creation_fn, tile_rnn_hidden_for_decoder
+from aevnmt.components import TransformerEncoder, TransformerDecoder
+from aevnmt.components.transformer import generate_padding_mask, generate_square_subsequent_mask
 
 
 class GenerativeLM(nn.Module):
@@ -560,8 +562,8 @@ class IBM1TM(GenerativeTM):
 
 class AttentionBasedTM(GenerativeTM):
 
-    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx, 
-            encoder, decoder, latent_size, dropout, feed_z, tied_embeddings):
+    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
+            encoder, decoder, latent_size, dropout, feed_z_method, tied_embeddings):
         super().__init__()
         self.src_embedder = src_embedder
         self.tgt_embedder = tgt_embedder
@@ -569,17 +571,23 @@ class AttentionBasedTM(GenerativeTM):
         self.tgt_eos_idx = tgt_eos_idx
         self.encoder = encoder
         self.decoder = decoder
-        self.encoder_init_layer = nn.Sequential(
-            nn.Linear(latent_size, encoder.hidden_size),
-            nn.Tanh())
-        self.decoder_init_layer = nn.Sequential(
-            nn.Linear(latent_size, decoder.hidden_size),
-            nn.Tanh())
+        
         self.tied_embeddings = tied_embeddings
         if not tied_embeddings:
             self.output_matrix = nn.Parameter(torch.randn(tgt_embedder.num_embeddings, decoder.hidden_size))
         self.dropout_layer = nn.Dropout(p=dropout)
-        self.feed_z = feed_z
+
+        for method in feed_z_method:
+            assert method in ["init_encoder", "init_decoder", "cat"], f"Unknown feed_z_method: {method}"
+        self.feed_z_method = feed_z_method
+        if "init_encoder" in self.feed_z_method:
+            self.encoder_init_layer = nn.Sequential(
+                nn.Linear(latent_size, encoder.hidden_size),
+                nn.Tanh())
+        if "init_decoder" in self.feed_z_method:
+            self.decoder_init_layer = nn.Sequential(
+                nn.Linear(latent_size, decoder.hidden_size),
+                nn.Tanh())
     
     def src_embed(self, x):
         x_embed = self.src_embedder(x)
@@ -592,13 +600,19 @@ class AttentionBasedTM(GenerativeTM):
         return y_embed
 
     def init_decoder(self, encoder_outputs, encoder_final, z):
-        self.decoder.init_decoder(encoder_outputs, encoder_final)
-        hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
+        if "init_decoder" in self.feed_z_method:
+            self.decoder.init_decoder(encoder_outputs, encoder_final)
+            hidden = tile_rnn_hidden_for_decoder(self.decoder_init_layer(z), self.decoder)
+        else:
+            hidden = self.decoder.init_decoder(encoder_outputs, encoder_final)
         return hidden
 
     def encode(self, x, seq_len_x, z):
         x_embed = self.src_embed(x)
-        hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
+        if "init_encoder" in self.feed_z_method:
+            hidden = tile_rnn_hidden(self.encoder_init_layer(z), self.encoder.rnn)
+        else:
+            hidden = None
         return self.encoder(x_embed, seq_len_x, hidden=hidden)
 
     def generate(self, pre_output):
@@ -614,11 +628,12 @@ class AttentionBasedTM(GenerativeTM):
         tm_logits = []
         all_att_weights = []
         max_time = y.size(1)
+        feed_z = "cat" in self.feed_z_method
         for t in range(max_time):
             prev_y = y[:, t]
             y_embed = self.tgt_embed(prev_y)
             pre_output, hidden, att_weights = self.decoder.step(
-                y_embed, hidden, seq_mask_x, encoder_outputs, z=z if self.feed_z else None)
+                y_embed, hidden, seq_mask_x, encoder_outputs, z=z if feed_z else None)
             logits = self.generate(pre_output)
             tm_logits.append(logits)
             all_att_weights.append(att_weights)
@@ -640,9 +655,11 @@ class AttentionBasedTM(GenerativeTM):
         predictions = []
         log_probs = []
         is_complete = torch.zeros_like(prev_y).unsqueeze(-1).byte()
+        feed_z = "cat" in self.feed_z_method
         for t in range(max_len):
             prev_y = self.tgt_embedder(prev_y)
-            pre_output, hidden, _ = self.decoder.step(prev_y, hidden, seq_mask_x, encoder_outputs, z)
+            pre_output, hidden, _ = self.decoder.step(
+                prev_y, hidden, seq_mask_x, encoder_outputs, z=z if feed_z else None)
             logits = self.generate(pre_output)
             py_xz = Categorical(logits=logits)
             if greedy:
@@ -658,3 +675,233 @@ class AttentionBasedTM(GenerativeTM):
         state['log_prob'] = torch.cat(log_probs, dim=1) 
         return torch.cat(predictions, dim=1)
 
+
+class TransformerTM(GenerativeTM):
+    """
+    A GenerativeTM that supports Transformer architectures.
+    """
+
+    def __init__(self, src_embedder, tgt_embedder, tgt_sos_idx, tgt_eos_idx,
+                 encoder, decoder, latent_size, dropout, tied_embeddings,
+                 feed_z_method=["first"]):
+        super().__init__()
+        self.src_embedder = src_embedder
+        self.tgt_embedder = tgt_embedder
+        self.tgt_sos_idx = tgt_sos_idx
+        self.tgt_eos_idx = tgt_eos_idx
+        self.encoder = encoder
+        self.decoder = decoder
+        self.tied_embeddings = tied_embeddings
+        if not self.tied_embeddings:
+            self.output_matrix = nn.Parameter(torch.randn(tgt_embedder.num_embeddings, decoder.input_size))
+        else:
+            self.output_matrix = self.tgt_embedder.weight
+        self.dropout_layer = nn.Dropout(p=dropout)
+
+        for method in feed_z_method:
+            assert method in ['first'], f"Unknown feed_z_method: {method}"
+        self.feed_z_method = feed_z_method
+
+        if "first" in self.feed_z_method:
+            self.fc_z_enc = nn.Linear(latent_size, src_embedder.embedding_dim)
+            self.fc_z_dec = nn.Linear(latent_size, tgt_embedder.embedding_dim)
+
+        # A function alias to clean up beam search code.
+        self.tgt_embed = self.prepare_decoder_input
+
+    def prepare_decoder_input(self, y, encoder_out, seq_len_x, z):
+        """
+        embed y, and add z to inputs according to self.feed_z_method.
+        """
+        y_emb = self.tgt_embedder(y) # [B, T, D]
+
+        if "first" in self.feed_z_method:
+            # Add z as first decoder input, encoder outputs stay the same.
+            z_dec = self.fc_z_dec(z) # [B, D]
+            y_emb = torch.cat([z_dec.unsqueeze(1), y_emb], 1) # [B, T+1, D]
+
+        return y_emb, encoder_out, seq_len_x
+
+    def prepare_encoder_input(self, x, seq_len_x, z):
+        """
+        embed x, and add z to inputs according to self.feed_z_method.
+        """
+        x_emb = self.src_embedder(x) # [B, T, D]
+
+        if "first" in self.feed_z_method:
+            # Add z as first encoder input. to both encoder and decoder inputs.
+            z_enc = self.fc_z_enc(z) # [B, D]
+            x_emb = torch.cat([z_enc.unsqueeze(1), x_emb], 1) # [B, T+1, D]
+            # Sequences get 1 longer.
+            seq_len_x = seq_len_x.clone() + 1
+
+        return x_emb, seq_len_x
+
+    def encode(self, x, seq_len_x, z):
+        x_emb, seq_len_x = self.prepare_encoder_input(x, seq_len_x, z)
+        encoder_out, _ = self.encoder(x_emb, seq_len_x)
+        return encoder_out, seq_len_x
+
+    def generate(self, pre_output):
+        return F.linear(pre_output, self.output_matrix)
+
+    def forward(self, x, seq_mask_x, seq_len_x, y, z, state=dict()) -> Distribution:
+        encoder_out, seq_len_x = self.encode(x, seq_len_x, z)
+
+        y_emb, encoder_out, seq_len_x = self.prepare_decoder_input(y, encoder_out, seq_len_x, z)
+        decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
+        logits = self.generate(decoder_out)
+
+        if "first" in self.feed_z_method:
+            # Omit first output, since first input is z instead of start token.
+            logits = logits[:, 1:]
+
+        return Categorical(logits=logits)
+
+
+    def log_prob(self, likelihood: Distribution, y):
+        """
+        Return log-probability of observation.
+
+        likelihood: as returned by forward
+        y: [B, Ty] observed token ids
+        """
+        return (likelihood.log_prob(y) * (y != self.tgt_embedder.padding_idx).float()).sum(-1)
+    
+    def sample(self, x, seq_mask_x, seq_len_x, z, max_len=100, greedy=False, state=dict()):
+        encoder_out, seq_len_x = self.encode(x, seq_len_x, z)
+        batch_size = x.size(0)
+        prev_y = torch.full(size=[batch_size, 1], fill_value=self.tgt_sos_idx, dtype=torch.long, device=x.device)
+
+        # Decode step-by-step. 
+        # Because the transformer has no hidden state, the full decoder input is fed at each time step.
+        predictions = []
+        log_probs = []
+        is_complete = torch.zeros_like(prev_y).byte()
+        for _ in range(max_len):
+            y_emb, encoder_out, seq_len_x = self.prepare_decoder_input(prev_y, encoder_out, seq_len_x, z)
+            decoder_out = self.decoder(y_emb, encoder_out, seq_len_x)
+            logits = self.generate(decoder_out)
+            logit_t = logits[:, -1].unsqueeze(1) #[B, 1, |Y|]
+            pyt_xz = Categorical(logits=logit_t)
+            if greedy:
+                prediction = torch.argmax(logit_t, dim=-1)
+            else:
+                prediction = pyt_xz.sample()
+            prev_y = torch.cat([prev_y, prediction], dim=1)
+            log_prob_t = pyt_xz.log_prob(prediction)
+
+            log_probs.append(log_prob_t)
+            predictions.append(torch.where(is_complete, torch.full_like(prediction, self.tgt_embedder.padding_idx), prediction))
+            is_complete = is_complete | (prediction == self.tgt_eos_idx).byte()
+
+        state['log_prob'] = torch.cat(log_probs, dim=1) 
+        return torch.cat(predictions, dim=1)
+
+
+class TransformerLM(GenerativeLM):
+    """
+    The forward will return the likelihoods 
+        X_i|z,x_{<i}
+
+    To get the likelihood of an observation, use log_prob.
+    """
+
+    def __init__(self, embedder, sos_idx, eos_idx, latent_size, hidden_size, 
+                 num_heads, num_layers, dropout, tied_embeddings, feed_z_method=["first"]):
+        super().__init__()
+        self.embedder = embedder
+        self. pad_idx = embedder.padding_idx
+        self.sos_idx = sos_idx
+        self.eos_idx = eos_idx
+        self.transformer = TransformerEncoder(
+            embedder.embedding_dim, hidden_size, num_heads, num_layers, dropout, autoregressive=True
+        )
+        self.tied_embeddings = tied_embeddings
+        if not self.tied_embeddings:
+            self.output_matrix = nn.Parameter(torch.randn(embedder.num_embeddings, self.transformer.input_size))
+        else:
+            self.output_matrix = self.embedder.weight
+        self.dropout_layer = nn.Dropout(p=dropout)
+
+        # For future experiments, different methods of adding z into the transformer.
+        for method in feed_z_method:
+            assert method in ['first'], f"Unknown feed_z_method: {method}"
+        self.feed_z_method = feed_z_method
+
+        if 'first' in self.feed_z_method:
+            self.fc_z = nn.Linear(latent_size, embedder.embedding_dim)
+
+    
+    def prepare_input(self, x, z):
+        """
+        Embeds the inputs x, and adds in z according to self.feed_z_method.
+        """
+
+        x_emb = self.embedder(x) # [B, T, D]
+
+        if "first" in self.feed_z_method:
+            # Add z as first input to transformer.
+            z_emb = self.fc_z(z) # [B, D]
+            x_emb = torch.cat([z_emb.unsqueeze(1), x_emb], 1) # [B, T+1, D]
+
+        return x_emb
+
+    def forward(self, x, z, state=dict()) -> Distribution:
+        """
+        Return distributions X_i|z, x_{<i}.
+
+        x: [B, Tx] token ids
+        z: [B, Dz] stochastic embeddings
+        state: use this dictionary to return something about the forward pass (for example, 
+            attention weights, or other details of the computation that you whish to log)
+        """
+        x_emb = self.prepare_input(x, z)
+        hidden, _ = self.transformer(x_emb)
+
+        if "first" in self.feed_z_method:
+            hidden = hidden[:, 1:]
+        logits = F.linear(hidden, self.output_matrix)
+
+        return Categorical(logits=logits)
+
+    def log_prob(self, likelihood: Distribution, x):
+        """
+        Return log-probability of observation.
+
+        likelihood: as returned by forward
+        x: [B, Tx] observed token ids
+        """
+        return (likelihood.log_prob(x) * (x != self.pad_idx).float()).sum(-1)
+
+    def sample(self, z, max_len=100, greedy=False, state=dict()):
+        """
+        Sample from X|z where z [B, Dz]
+        """
+        batch_size = z.size(0)
+        prev_x = torch.full(size=[batch_size, 1], fill_value=self.sos_idx, dtype=torch.long, device=z.device)
+
+        # Decode step-by-step.
+        # Because the transformer has no hidden state, the full decoder input is fed at each time step.
+        predictions = []
+        log_probs = []
+        is_complete = torch.zeros_like(prev_x).byte()
+        for _ in range(max_len):
+            x_emb = self.prepare_input(prev_x, z)
+            pre_output, _ = self.transformer(x_emb)
+            logits = F.linear(pre_output, self.output_matrix)
+            logit_t = logits[:, -1].unsqueeze(1) #[B, 1, |Y|]
+            px_z = Categorical(logits=logit_t)
+            if greedy:
+                prediction = torch.argmax(logit_t, dim=-1)
+            else:
+                prediction = px_z.sample()
+            prev_x = torch.cat([prev_x, prediction], dim=1)
+            log_prob_t = px_z.log_prob(prediction)
+
+            log_probs.append(log_prob_t)
+            predictions.append(torch.where(is_complete, torch.full_like(prediction, self.embedder.padding_idx), prediction))
+            is_complete = is_complete | (prediction == self.eos_idx).byte()
+
+        state['log_prob'] = torch.cat(log_probs, dim=1) 
+        return torch.cat(predictions, dim=1)

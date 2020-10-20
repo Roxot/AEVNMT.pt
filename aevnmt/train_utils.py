@@ -9,7 +9,8 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from aevnmt.data import MemMappedCorpus, MemMappedParallelCorpus
 from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword_tokens
-from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder, TransformerEncoder, RNNEncoder
+from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder
+from aevnmt.components import RNNEncoder, TransformerEncoder, TransformerDecoder
 
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
@@ -66,7 +67,8 @@ def load_vocabularies(hparams):
     if hparams.vocab.prefix is not None:
 
         if hparams.vocab.shared:
-            vocab = Vocabulary.from_file(hparams.vocab.prefix, max_size=hparams.vocab.max_size)
+            vocab_file = f"{hparams.vocab.prefix}.{hparams.src}"
+            vocab = Vocabulary.from_file(vocab_file, max_size=hparams.vocab.max_size)
             vocab_src = vocab
             vocab_tgt = vocab
         else:
@@ -110,10 +112,10 @@ def create_encoder(hparams):
                              cell_type=hparams.gen.tm.rnn.cell_type)
     elif hparams.gen.tm.enc.style == "transformer":
         return TransformerEncoder(input_size=hparams.emb.size,
-                                     num_heads=hparams.gen.tm.transformer.num_heads,
-                                     num_layers=hparams.gen.tm.transformer.num_layers,
-                                     dim_ff=hparams.gen.tm.transformer.hidden_size,
-                                     dropout=hparams.dropout)
+                                  hidden_size=hparams.gen.tm.transformer.hidden_size,
+                                  num_heads=hparams.gen.tm.transformer.num_heads,
+                                  num_layers=hparams.gen.tm.transformer.num_layers,
+                                  dropout=hparams.dropout)
     else:
         raise Exception(f"Unknown encoder style: {hparams.gen.tm.enc.style}")
 
@@ -137,6 +139,13 @@ def create_decoder(attention, hparams):
                             cell_type=hparams.gen.tm.rnn.cell_type,
                             init_from_encoder_final=init_from_encoder_final,
                             feed_z_size=hparams.prior.latent_size if hparams.gen.tm.dec.feed_z else 0)
+    elif hparams.gen.tm.dec.style == "transformer":
+        return TransformerDecoder(
+            input_size=hparams.emb.size,
+            hidden_size=hparams.gen.tm.transformer.hidden_size,
+            num_heads=hparams.gen.tm.transformer.num_heads,
+            num_layers=hparams.gen.tm.transformer.num_layers,
+            dropout=hparams.dropout)
     else:
         raise Exception(f"Unknown decoder style: {hparams.gen.tm.dec.style}")
 

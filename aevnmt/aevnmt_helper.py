@@ -19,8 +19,10 @@ from aevnmt.models.generative import GenerativeLM, IndependentLM, CorrelatedBern
 from aevnmt.models.generative import CorrelatedCategoricalsLM, CorrelatedPoissonsLM
 from aevnmt.models.generative import GenerativeTM, IndependentTM, CorrelatedBernoullisTM, CorrelatedCategoricalsTM
 from aevnmt.models.generative import CorrelatedPoissonsTM, IBM1TM, AttentionBasedTM
+from aevnmt.models.generative import TransformerLM, TransformerTM
 from aevnmt.models.inference import InferenceModel, BasicInferenceModel, SwitchingInferenceModel
 from aevnmt.models.inference import get_inference_encoder, combine_inference_encoders
+from aevnmt.models.parallel import ParallelWrapper
 from aevnmt.dist import get_named_params, create_prior
 from aevnmt.dist import ProductOfPriorsLayer, ProductOfConditionalsLayer
 from aevnmt.dist import NormalLayer, KumaraswamyLayer, HardKumaraswamyLayer
@@ -41,6 +43,39 @@ def _draw_translations(model, val_dl, vocab_src, vocab_tgt, device, hparams):
             references += sentences_y.tolist()
             model_hypotheses += hypothesis.tolist()
     return inputs, references, model_hypotheses
+
+
+def create_language_model(vocab_src, src_embedder, hparams) -> GenerativeLM:
+    if hparams.gen.lm.style == "rnn":
+        language_model = CorrelatedCategoricalsLM(
+            embedder=src_embedder,
+            sos_idx=vocab_src[SOS_TOKEN],
+            eos_idx=vocab_src[EOS_TOKEN],
+            latent_size=hparams.prior.latent_size,
+            hidden_size=hparams.gen.lm.rnn.hidden_size,
+            dropout=hparams.dropout,
+            num_layers=hparams.gen.lm.rnn.num_layers,
+            cell_type=hparams.gen.lm.rnn.cell_type,
+            tied_embeddings=hparams.gen.lm.tied_embeddings,
+            feed_z=hparams.gen.lm.feed_z,
+            gate_z=False  # TODO implement
+        )
+    elif hparams.gen.lm.style == "transformer":
+        language_model = TransformerLM(
+            embedder=src_embedder,
+            sos_idx=vocab_src[SOS_TOKEN],
+            eos_idx=vocab_src[EOS_TOKEN],
+            latent_size=hparams.prior.latent_size,
+            hidden_size=hparams.gen.lm.transformer.hidden_size,
+            num_heads=hparams.gen.lm.transformer.num_heads,
+            num_layers=hparams.gen.lm.transformer.num_layers,
+            dropout=hparams.dropout,
+            tied_embeddings=hparams.gen.lm.tied_embeddings,
+            feed_z_method=["first"] if hparams.gen.lm.feed_z else []
+        )
+    else:
+        raise NotImplementedError(f"Unknown language model style: {hparams.lm.style}")
+    return language_model
 
 
 def create_aux_language_models(vocab_src, src_embedder, hparams) -> Dict[str, GenerativeLM]:
@@ -69,6 +104,46 @@ def create_aux_language_models(vocab_src, src_embedder, hparams) -> Dict[str, Ge
     if hparams.aux.shuffle_lm:
         raise NotImplementedError("This is not yet supported")
     return lms
+
+
+def create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams):
+    encoder = create_encoder(hparams)
+    attention = create_attention(hparams)
+    decoder = create_decoder(attention, hparams)
+
+    if hparams.gen.tm.enc.style == 'transformer' and hparams.gen.tm.dec.style == 'transformer':
+        translation_model = TransformerTM(
+            src_embedder=src_embedder,
+            tgt_embedder=tgt_embedder,
+            tgt_sos_idx=vocab_tgt[SOS_TOKEN],
+            tgt_eos_idx=vocab_tgt[EOS_TOKEN],
+            encoder=encoder,
+            decoder=decoder,
+            latent_size=hparams.prior.latent_size,
+            dropout=hparams.dropout,
+            tied_embeddings=hparams.gen.tm.dec.tied_embeddings,
+            feed_z_method=["first"]
+        )
+    elif (hparams.gen.tm.enc.style == 'transformer') ^ (hparams.gen.tm.dec.style == 'transformer'):
+        raise NotImplementedError("When using a transformer TM, both encoder and decoder have to be transformer")
+    else:
+        feed_z_method = ['init_encoder', 'init_decoder']
+        if hparams.gen.tm.dec.feed_z:
+            feed_z_method.append('cat')
+        translation_model = AttentionBasedTM(
+            src_embedder=src_embedder,
+            tgt_embedder=tgt_embedder,
+            tgt_sos_idx=vocab_tgt[SOS_TOKEN],
+            tgt_eos_idx=vocab_tgt[EOS_TOKEN],
+            encoder=encoder,
+            decoder=decoder,
+            latent_size=hparams.prior.latent_size,
+            dropout=hparams.dropout,
+            feed_z_method=feed_z_method,
+            tied_embeddings=hparams.gen.tm.dec.tied_embeddings
+        )
+
+    return translation_model
 
 
 def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[str, GenerativeTM]:
@@ -122,9 +197,10 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
             transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
-            nli_max_distance=20,  # TODO: generalise
-            dropout=hparams.dropout, 
+            nli_max_distance=20, # TODO: generalise
+            dropout=hparams.dropout,
             composition=hparams.inf.composition)
         if len(latent_sizes) != len(hparams.posterior.family.split(";")):
             raise ValueError("You need as many posteriors as you have priors")
@@ -159,6 +235,7 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
             transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
@@ -173,7 +250,8 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             rnn_num_layers=hparams.inf.rnn.num_layers,
             rnn_cell_type=hparams.inf.rnn.cell_type,
             transformer_heads=hparams.inf.transformer.num_heads,
-            transformer_layers=hparams.inf.transformer.num_layers, 
+            transformer_layers=hparams.inf.transformer.num_layers,
+            transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
             nli_max_distance=20,  # TODO: generalise 
             dropout=hparams.dropout, 
@@ -192,6 +270,7 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
                 rnn_cell_type=hparams.inf.rnn.cell_type,
                 transformer_heads=hparams.inf.transformer.num_heads,
                 transformer_layers=hparams.inf.transformer.num_layers,
+                transformer_hidden=hparams.inf.transformer.hidden_size,
                 nli_shared_size=hparams.emb.size,
                 nli_max_distance=20,  # TODO: generalise 
                 dropout=hparams.dropout, 
@@ -221,39 +300,13 @@ def create_model(hparams, vocab_src, vocab_tgt):
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
     tgt_embedder = torch.nn.Embedding(vocab_tgt.size(), hparams.emb.size, padding_idx=vocab_tgt[PAD_TOKEN])
     
-    language_model = CorrelatedCategoricalsLM(
-        embedder=src_embedder,
-        sos_idx=vocab_src[SOS_TOKEN],
-        eos_idx=vocab_src[EOS_TOKEN],
-        latent_size=hparams.prior.latent_size,
-        hidden_size=hparams.gen.lm.rnn.hidden_size,
-        dropout=hparams.dropout,
-        num_layers=hparams.gen.lm.rnn.num_layers,
-        cell_type=hparams.gen.lm.rnn.cell_type,
-        tied_embeddings=hparams.gen.lm.tied_embeddings,
-        feed_z=hparams.gen.lm.feed_z,
-        gate_z=False  # TODO implement
-    )
+    language_model = create_language_model(vocab_src, src_embedder, hparams)
     
     # Auxiliary generative components
     aux_lms = create_aux_language_models(vocab_src, src_embedder, hparams)
     aux_tms = create_aux_translation_models(src_embedder, tgt_embedder, hparams)
     
-    encoder = create_encoder(hparams)
-    attention = create_attention(hparams)
-    decoder = create_decoder(attention, hparams)
-    translation_model = AttentionBasedTM(
-        src_embedder=src_embedder,
-        tgt_embedder=tgt_embedder,
-        tgt_sos_idx=vocab_tgt[SOS_TOKEN],
-        tgt_eos_idx=vocab_tgt[EOS_TOKEN],
-        encoder=encoder,
-        decoder=decoder,
-        latent_size=hparams.prior.latent_size,
-        dropout=hparams.dropout,
-        feed_z=hparams.gen.tm.dec.feed_z,
-        tied_embeddings=hparams.gen.tm.dec.tied_embeddings
-    )
+    translation_model = create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams)
    
     priors = []
     n_priors = len(hparams.prior.family.split(";"))
@@ -329,11 +382,13 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
                       free_nats=hparams.kl.free_nats,
                       KL_weight=KL_weight,
                       reduction="mean",
+                      smoothing_x=hparams.gen.lm.label_smoothing,
+                      smoothing_y=hparams.gen.tm.label_smoothing,
                       aux_lm_likelihoods=aux_lm_likelihoods,
                       aux_tm_likelihoods=aux_tm_likelihoods,
                       loss_cfg=loss_cfg)
 
-    if summary_writer:
+    if summary_writer and step % hparams.print_every == 0:
         summary_writer.add_histogram("posterior/z", z, step)
         for param_name, param_value in get_named_params(qz):
             summary_writer.add_histogram("posterior/%s" % param_name, param_value, step)
@@ -348,6 +403,8 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     return loss
 
 def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title='xy', summary_writer=None):
+    if isinstance(model, ParallelWrapper):
+        model = model.module.model
     model.eval()
 
     # Create the validation dataloader. We can just bucket.
@@ -415,11 +472,16 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
             y_in, y_out, seq_mask_y, seq_len_y = create_batch([val_sentence_y], vocab_tgt, device)
             z = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y).sample()
             _, _, state, _, _ = model(x_in, seq_mask_x, seq_len_x, y_in, z)
-            att_weights = state['att_weights'].squeeze().cpu().numpy()
+            if 'att_weights' in state:
+                att_weights = state['att_weights'].squeeze().cpu().numpy()
+            else:
+                att_weights = None
         src_labels = batch_to_sentences(x_in, vocab_src, no_filter=True)[0].split()
         tgt_labels = batch_to_sentences(y_out, vocab_tgt, no_filter=True)[0].split()
-        attention_summary(src_labels, tgt_labels, att_weights, summary_writer,
-                          f"{title}/validation/attention", step)
+        if att_weights is not None:
+            # TODO add attention summary for Transformer
+            attention_summary(src_labels, tgt_labels, att_weights, summary_writer,
+                            f"{title}/validation/attention", step)
 
     return {'bleu': val_bleu, 'likelihood': -val_NLL, 'nll': val_NLL, 'ppl': val_ppl}
 
@@ -437,45 +499,34 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
         #z = qz.mean if deterministic else qz.sample()
         z = qz.sample()
 
-        encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
-        hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
+        if isinstance(model.translation_model, TransformerTM):
+            encoder_outputs, seq_len_x = model.translation_model.encode(x_in, seq_len_x, z)
+            encoder_final = None
+            hidden = None
+        else:
+            encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
+            hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
 
         if hparams.decoding.sample:
-            # TODO: we could use the new version below
-            #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
-            #    max_len=hparams.decoding.max_length, greedy=False)
-            raw_hypothesis = sampling_decode(
-                model.translation_model.decoder, 
-                model.translation_model.tgt_embed,
-                model.translation_model.generate, hidden,
-                encoder_outputs, encoder_final,
-                seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                vocab_tgt[PAD_TOKEN], hparams.decoding.max_length,
-                z if hparams.gen.tm.dec.feed_z else None)
+            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+               max_len=hparams.decoding.max_length, greedy=False)
+
         elif hparams.decoding.beam_width <= 1:
-            # TODO: we could use the new version below
-            #raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z, 
-            #    max_len=hparams.decoding.max_length, greedy=True)
-            raw_hypothesis = greedy_decode(
-                model.translation_model.decoder, 
-                model.translation_model.tgt_embed,
-                model.translation_model.generate, hidden,
-                encoder_outputs, encoder_final,
-                seq_mask_x, vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                vocab_tgt[PAD_TOKEN], hparams.decoding.max_length,
-                z if hparams.gen.tm.dec.feed_z else None)
+            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+               max_len=hparams.decoding.max_length, greedy=True)
+
         else:
             raw_hypothesis = beam_search(
                 model.translation_model.decoder, 
                 model.translation_model.tgt_embed, 
                 model.translation_model.generate,
                 vocab_tgt.size(), hidden, encoder_outputs,
-                encoder_final, seq_mask_x,
+                encoder_final, seq_mask_x, seq_len_x,
                 vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
                 vocab_tgt[PAD_TOKEN], hparams.decoding.beam_width,
                 hparams.decoding.length_penalty_factor,
                 hparams.decoding.max_length,
-                z if hparams.gen.tm.dec.feed_z else None)
+                z)
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis

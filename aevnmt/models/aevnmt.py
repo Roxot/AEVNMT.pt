@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical 
 
 from aevnmt.dist import PriorLayer, get_named_params
+from aevnmt.components import label_smoothing_loss, MDRConstraint
 
 from .generative import GenerativeLM, GenerativeTM
 from .inference import InferenceModel
@@ -38,8 +39,8 @@ class AEVNMT(nn.Module):
         self.aux_tms = nn.ModuleDict(aux_tms)
 
         self.mdr = mdr
-        if mdr > 0.:
-            self.mdr_lag_weight = torch.nn.Parameter(torch.tensor([1.]))
+        if self.mdr > 0.:
+            self.mdr_constraint = MDRConstraint(self.mdr)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -69,9 +70,8 @@ class AEVNMT(nn.Module):
    
     def lagrangian_parameters(self):
         if self.mdr > 0.:
-            return [self.mdr_lag_weight]
-        else:
-            return None
+            return self.mdr_constraint.parameters()
+        return None
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
         """
@@ -123,7 +123,8 @@ class AEVNMT(nn.Module):
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
-            free_nats=0., KL_weight=1., reduction="mean", aux_lm_likelihoods=dict(), aux_tm_likelihoods=dict(), loss_cfg=set()):
+            free_nats=0., KL_weight=1., smoothing_x=0., smoothing_y=0., reduction="mean", aux_lm_likelihoods=dict(), 
+            aux_tm_likelihoods=dict(), loss_cfg=set()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
         variable that was used to compute the categorical parameters, and the distributions qz
@@ -140,12 +141,21 @@ class AEVNMT(nn.Module):
         :param aux_lm_likelihoods: a dictionary with LM likelihoods
         :param aux_tm_likelihoods: a dictionary with TM likelihoods
         """
+        out_dict = dict()
+
         # [B]
         tm_log_likelihood = self.translation_model.log_prob(tm_likelihood, targets_y)
+        if smoothing_y > 0:
+            tm_smooth_loss = label_smoothing_loss(tm_likelihood, targets_y, ignore_index=self.translation_model.tgt_embedder.padding_idx)
+            tm_log_likelihood = (1 - smoothing_y) * tm_log_likelihood + smoothing_y * tm_smooth_loss.sum(-1)
         tm_loss = - tm_log_likelihood
 
         # [B]
         lm_log_likelihood = self.language_model.log_prob(lm_likelihood, targets_x)
+        if smoothing_x > 0:
+            lm_smooth_loss = label_smoothing_loss(lm_likelihood, targets_x,
+                                                  ignore_index=self.language_model.pad_idx)
+            lm_log_likelihood = (1 - smoothing_x) * lm_log_likelihood + smoothing_x * lm_smooth_loss.sum(-1)
         lm_loss = - lm_log_likelihood
 
         # Compute the KL divergence between the distribution used to sample z, and the prior
@@ -157,8 +167,11 @@ class AEVNMT(nn.Module):
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-
-        out_dict = dict()
+        # Add MDR constraint.
+        if self.mdr > 0.:
+            mdr_loss = self.mdr_constraint(KL)
+            out_dict[f'constraints/{self.mdr_constraint.name}'] = self.mdr_constraint.multiplier.detach()
+            loss = loss + mdr_loss
         out_dict['KL'] = KL
         out_dict['raw_KL'] = raw_KL
        
@@ -225,10 +238,6 @@ class AEVNMT(nn.Module):
             out_dict['lm/recurrent'] = lm_log_likelihood
             out_dict['tm/recurrent'] = tm_log_likelihood
 
-        # Add MDR constraint.
-        if self.mdr > 0.:
-            constraint = self.mdr_lag_weight * (self.mdr - KL.mean()) 
-            loss = loss + constraint
 
         # Return differently according to the reduction setting.
         if reduction == "mean":

@@ -15,8 +15,8 @@ from torch.distributions import Distribution
 
 from aevnmt.dist import NormalLayer, KumaraswamyLayer
 from aevnmt.dist import Conditioner
-from aevnmt.components import RNNEncoder, TransformerEncoder
-from aevnmt.components import DecomposableAttentionEncoder
+from aevnmt.components import RNNEncoder, DecomposableAttentionEncoder
+from aevnmt.components import TransformerEncoder, TransformerDecoder, TransformerCompositionFunction
 
 
 class InferenceEncoder(nn.Module):
@@ -25,7 +25,7 @@ class InferenceEncoder(nn.Module):
         q(z|x) or q(z|x,y).
     This is a general interface, it exposes two properties
         - output_size
-    and fixes a signature for the forward method, where we always expect the pair (x,y). Though note, 
+    and fixes a signature for the forward method, where we always expect the pair (x,y). Though note,
     not every implementation will necessarily use x and y.
     """
 
@@ -94,47 +94,6 @@ class RecurrentEncoderY(InferenceEncoder):
         return self.encoder(y, seq_mask_y, seq_len_y, None, None, None)
 
 
-class TransformerEncoderX(InferenceEncoder):
-    """
-    Encodes a sequence (e.g. x) into a fixed-dimension vector using a recurrent cell (possibly bidirectional).
-    """
-
-    def __init__(self, embedder, hidden_size, num_heads, num_layers, dropout=0.):
-        super().__init__()
-        self.embedder = embedder
-        self.transformer = TransformerEncoder(
-            input_size=embedder.embedding_dim,
-            num_heads=num_heads,
-            num_layers=num_layers,
-            dim_ff=hidden_size,
-            dropout=dropout)
-        self.hidden_size = hidden_size
-        self.output_size = hidden_size
-
-    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
-        x_embed = self.embedder(x).detach()
-        encoder_outputs, first = self.transformer(x_embed, seq_len_x)
-        # TODO: support max pooling (and perhaps other composition functions)
-        return first
-
-
-class TransformerEncoderY(InferenceEncoder):
-    """
-    Encodes a sequence (e.g. x) into a fixed-dimension vector using a recurrent cell (possibly bidirectional).
-    """
-    
-    def __init__(self, embedder, hidden_size, num_heads, num_layers, dropout=0.):
-        super().__init__()
-        self.encoder = TransformerEncoderX(embedder, hidden_size, num_heads, num_layers, dropout)
-
-    @property
-    def output_size(self):
-        return self.encoder.output_size
-
-    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
-        return self.encoder(y, seq_mask_y, seq_len_y, None, None, None)
-
-
 class NLIEncoderXY(InferenceEncoder):
     """
     Encodes a pair of sequences (i.e. x, y) into a fixed-dimension vector using NLI's Decomposable Attention Model.
@@ -186,12 +145,79 @@ class CombinedEncoder(InferenceEncoder):
         hy = self.encoder_y(None, None, None, y, seq_mask_y, seq_len_y)
         # TODO: implement composition
         return torch.cat([hx, hy], -1)
+
+
+class TransformerEncoderX(InferenceEncoder):
+    """
+    Encodes a sequence (e.g. x) using a transformer encoder. To obtain a fixed dimension vector instead of the
+    full transformer output, use composition="first".
+    """
+
+    def __init__(self, embedder, hidden_size, num_heads, num_layers, dropout=0., composition="none"):
+        super().__init__()
+        self.embedder = embedder
+        self.transformer = TransformerEncoder(
+            input_size=embedder.embedding_dim,
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            num_layers=num_layers,
+            dropout=dropout)
+        self.hidden_size = hidden_size
+        self.output_size = embedder.embedding_dim
+        self.composition = composition
+
+    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
+        x_embed = self.embedder(x).detach()
+        encoder_outputs, first = self.transformer(x_embed, seq_len_x)
+
+        if self.composition == "none":
+            return encoder_outputs
+        elif self.composition == "first":
+            return first
+        else:
+            raise RuntimeError("Unknown composition method: {}".format(self.composition))
+
+
+class TransformerEncoderY(InferenceEncoder):
+    """
+    Encodes a sequence (e.g. x) into a fixed-dimension vector using a recurrent cell (possibly bidirectional).
+    """
+    
+    def __init__(self, embedder, hidden_size, num_heads, num_layers, dropout=0., composition="none"):
+        super().__init__()
+        self.encoder = TransformerEncoderX(embedder, hidden_size, num_heads, num_layers, dropout, composition=composition)
+
+    @property
+    def output_size(self):
+        return self.encoder.output_size
+
+    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
+        return self.encoder(y, seq_mask_y, seq_len_y, None, None, None)
+
+
+class CombinedTransformerEncoder(InferenceEncoder):
+
+    def __init__(self, encoder_x: InferenceEncoder, encoder_y: InferenceEncoder, composition):
+        super().__init__()
+        self.encoder_x = encoder_x
+        self.encoder_y = encoder_y
+        self.composition = composition
+
+    @property
+    def output_size(self):
+        raise NotImplementedError("I do not know what to do")
+
+    def forward(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
+        hx = self.encoder_x(x, seq_mask_x, seq_len_x, None, None, None)
+        hy = self.encoder_y(None, None, None, y, seq_mask_y, seq_len_y)
+        comp = self.composition(hx, seq_len_x, hy, seq_len_y)
+        return comp
         
 
 def get_inference_encoder(encoder_style: str, conditioning_context: str,
         embedder_x, embedder_y, hidden_size,
         rnn_bidirectional, rnn_num_layers, rnn_cell_type,
-        transformer_heads, transformer_layers,
+        transformer_heads, transformer_layers, transformer_hidden,
         nli_shared_size, nli_max_distance,
         dropout=0.0,composition="avg") -> InferenceEncoder:
     """Creates the appropriate encoder as a function of encoder_style and conditioning_context."""
@@ -220,18 +246,21 @@ def get_inference_encoder(encoder_style: str, conditioning_context: str,
         if conditioning_context == "x":
             encoder = TransformerEncoderX(
                 embedder=embedder_x,
-                hidden_size=hidden_size,
+                hidden_size=transformer_hidden,
                 num_heads=transformer_heads,
                 num_layers=transformer_layers,
-                dropout=dropout)
+                dropout=dropout,
+                composition="first")
         elif conditioning_context == "y":
             encoder = TransformerEncoderY(
                 embedder=embedder_y,
-                hidden_size=hidden_size,
+                hidden_size=transformer_hidden,
                 num_heads=transformer_heads,
                 num_layers=transformer_layers,
-                dropout=dropout)
+                dropout=dropout,
+                composition="first")
         else:
+            # TODO add CombinedTransformerEncoder and test. Implementation already exists.
             raise NotImplementedError("I cannot yet condition on the pair (x,y) with a Transformer, but I welcome contributions!")
     elif encoder_style == "nli":
         if conditioning_context == "xy":

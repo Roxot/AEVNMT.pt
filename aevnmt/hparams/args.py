@@ -47,6 +47,7 @@ io_args = {
     "src": (str, None, True, "The source language"),
     "tgt": (str, None, True, "The target language"),
     "use_gpu": (bool, False, False, "Whether to use the GPU or not"),
+    "data_parallel": (bool, False, False, "Train on multi-gpu with DataParallel."),
     "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
     "output_dir": (str, None, True, "Output directory."),
     "subword_token": (str, None, False, "The subword token, e.g. \"@@\"."),
@@ -88,14 +89,14 @@ emb_args = {
 }
 
 inf_args = {
-    "inf.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the inf transformer"),# TODO
-    "inf.transformer.num_layers": (int, 4, False, "The number of inf transformer layers"),# TODO
-    "inf.transformer.num_heads": (int, 8, False, "The number of inf transformer heads"),# TODO
-    "inf.rnn.hidden_size": (int, 32, False, "The size of the inf rnn layers"),# TODO
-    "inf.rnn.num_layers": (int, 1, False, "The number of inf rnn layers."),# TODO
-    "inf.rnn.cell_type": (str, "lstm", False, "The inf rnn cell type. rnn|gru|lstm"),# TODO
-    "inf.rnn.bidirectional": (bool, False, False, "Use bidirectional inf rnn"),# TODO
-    "inf.composition": (str, "avg", False, "Type of composition used after the inference network. avg|maxpool"),# TODO
+    "inf.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the inf transformer"),
+    "inf.transformer.num_layers": (int, 4, False, "The number of inf transformer layers"),
+    "inf.transformer.num_heads": (int, 8, False, "The number of inf transformer heads"),
+    "inf.rnn.hidden_size": (int, 32, False, "The size of the inf rnn layers"),
+    "inf.rnn.num_layers": (int, 1, False, "The number of inf rnn layers."),
+    "inf.rnn.cell_type": (str, "lstm", False, "The inf rnn cell type. rnn|gru|lstm"),
+    "inf.rnn.bidirectional": (bool, False, False, "Use bidirectional inf rnn"),
+    "inf.composition": (str, "avg", False, "Type of composition used after the inference network. avg|maxpool"),
     "inf.inf3_comb_composition": (str, "cat", False, "Composition function used to combined encodings for q(z|x,y) if --inf3 is set"),
     "inf.inf3": (str, "", False, "Specify encoders for three different inference models, namely, q(z|x), q(z|y) and q(z|x,y),"
                                  "e.g. rnn,rnn,nli or rnn,rnn,comb. The special type 'comb' uses the other two encoders to make an encoding of the pair."),
@@ -104,29 +105,31 @@ inf_args = {
 }
 
 tm_args = {
-    # NOTE: For now encoder and decoder share the same transformer/rnn params, 
+    # NOTE: For now encoder and decoder share the same transformer/rnn params,
     # since many configurations with split params are not supported.
-    "gen.tm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the tm transformer"), # TODO
-    "gen.tm.transformer.num_layers": (int, 4, False, "The number of tm transformer layers"), # TODO
-    "gen.tm.transformer.num_heads": (int, 8, False, "The number of tm transformer heads"), # TODO
-    "gen.tm.rnn.hidden_size": (int, 32, False, "The size of the tm rnn layers"), # TODO
-    "gen.tm.rnn.num_layers": (int, 1, False, "The number of tm rnn layers."), # TODO
-    "gen.tm.rnn.cell_type": (str, "lstm", False, "The tm rnn cell type. rnn|gru|lstm"), # TODO
+    "gen.tm.label_smoothing": (float, 0., False, "The label smoothing applied to TM likelihood"),
+    "gen.tm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the tm transformer"),
+    "gen.tm.transformer.num_layers": (int, 4, False, "The number of tm transformer layers"),
+    "gen.tm.transformer.num_heads": (int, 8, False, "The number of tm transformer heads"),
+    "gen.tm.rnn.hidden_size": (int, 32, False, "The size of the tm rnn layers"),
+    "gen.tm.rnn.num_layers": (int, 1, False, "The number of tm rnn layers."),
+    "gen.tm.rnn.cell_type": (str, "lstm", False, "The tm rnn cell type. rnn|gru|lstm"),
     "gen.tm.rnn.attention": (str, "luong", False, "Attention type: luong|scaled_luong|bahdanau"),
-    "gen.tm.rnn.bidirectional": (bool, False, False, "Use a bidirectional tm encoder."), # TODO
-    "gen.tm.dec.feed_z": (bool, False, False, "Concatenate z to the previous tm decoder embeddings at each timestep"),# TODO
-    "gen.tm.dec.tied_embeddings": (bool, False, False, "Tie the tm decoder embedding matrix with the output projection"),# TODO
-    "gen.tm.dec.style": (str, "luong", False, "TM decoder style: luong|bahdanau|transformer"),# TODO
-    "gen.tm.enc.style": (str, "rnn", False, "TM encoder style: rnn|transformer"),# TODO
+    "gen.tm.rnn.bidirectional": (bool, False, False, "Use a bidirectional tm encoder."),
+    "gen.tm.dec.feed_z": (bool, False, False, "Concatenate z to the previous tm decoder embeddings at each timestep"),
+    "gen.tm.dec.tied_embeddings": (bool, False, False, "Tie the tm decoder embedding matrix with the output projection"),
+    "gen.tm.dec.style": (str, "luong", False, "TM decoder style: luong|bahdanau|transformer"),
+    "gen.tm.enc.style": (str, "rnn", False, "TM encoder style: rnn|transformer"),
 }
 
 lm_args = {
-    "gen.lm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the lm transformer"), # TODO
-    "gen.lm.transformer.num_layers": (int, 4, False, "The number of lm transformer layers"), # TODO
-    "gen.lm.transformer.num_heads": (int, 8, False, "The number of lm transformer heads"), # TODO
-    "gen.lm.rnn.hidden_size": (int, 32, False, "The size of the lm rnn layers"), # TODO
-    "gen.lm.rnn.num_layers": (int, 1, False, "The number of lm rnn layers."), # TODO
-    "gen.lm.rnn.cell_type": (str, "lstm", False, "The lm rnn cell type. rnn|gru|lstm"), # TODO
+    "gen.lm.label_smoothing": (float, 0., False, "The label smoothing applied to LM likelihood"),
+    "gen.lm.transformer.hidden_size": (int, 2048, False, "The size of the feedforward layer in the lm transformer"),
+    "gen.lm.transformer.num_layers": (int, 4, False, "The number of lm transformer layers"),
+    "gen.lm.transformer.num_heads": (int, 8, False, "The number of lm transformer heads"),
+    "gen.lm.rnn.hidden_size": (int, 32, False, "The size of the lm rnn layers"),
+    "gen.lm.rnn.num_layers": (int, 1, False, "The number of lm rnn layers."),
+    "gen.lm.rnn.cell_type": (str, "lstm", False, "The lm rnn cell type. rnn|gru|lstm"),
     "gen.lm.tied_embeddings": (bool, False, False, "Tie the lm embedding matrix with the output projection"),
     "gen.lm.feed_z": (bool, False, False, "Concatenate z to the previous lm embeddings at each timestep"),
     "gen.lm.style": (str, "rnn", False, "LM style: rnn|transformer"),    
@@ -165,42 +168,42 @@ opt_args = {
                                        " after every epoch."),
     "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')"),
     # Inf
-    "inf.opt.lr_warmup": (int, 4000, False, "Inf learning rate warmup (noam_scheduler)"),# TODO
+    "inf.opt.lr_warmup": (int, 4000, False, "Inf learning rate warmup (noam_scheduler)"),
     "inf.opt.lr_min": (float, 1e-5, False, "The minimum  inf learning rate the learning rate"
-                                   " scheduler can reduce to (reduce_on_plateau scheduler)."),# TODO
+                                   " scheduler can reduce to (reduce_on_plateau scheduler)."),
     "inf.opt.lr_reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
                                           " checking for improvements after a"
                                           " learning rate reduction on inf"
-                                          " (reduce_on_plateau scheduler)."),# TODO
+                                          " (reduce_on_plateau scheduler)."),
     "inf.opt.lr_reduce_patience": (int, 2, False, "The number of evaluations to wait for"
                                            " improvement of validation scores"
                                            " before reducing the learning rate"
-                                           " (reduce_on_plateau scheduler)."),# TODO
+                                           " (reduce_on_plateau scheduler)."),
     "inf.opt.lr_reduce_factor": (float, 0.5, False, "The factor to reduce the inf learning rate"
                                             " with if no validation improvement is"
-                                            " found."), # TODO
+                                            " found."),
     "inf.opt.lr_scheduler": (str, "reduce_on_plateau", False, "The inf learning rate scheduler used: reduce_on_plateau |"
-                                                      " noam (transformers)"), # TODO
+                                                      " noam (transformers)"),
     "inf.opt.lr": (float, 1e-3, False, "The learning rate for inf_z_optimizer."),
     "inf.opt.l2_weight": (float, 0., False, "Strength of L2 regulariser for inference parameters wrt z"),
     "inf.opt.style": (str, "adam", False, "Optimizer for inference parameters wrt z (options: adam, amsgrad, adadelta, sgd)"),
     # Gen
-    "gen.opt.lr_warmup": (int, 4000, False, "Ge learning rate warmup (noam_scheduler)"),# TODO
+    "gen.opt.lr_warmup": (int, 4000, False, "Ge learning rate warmup (noam_scheduler)"),
     "gen.opt.lr_min": (float, 1e-5, False, "The minimum  gen learning rate the learning rate"
-                                   " scheduler can reduce to (reduce_on_plateau scheduler)."),# TODO
+                                   " scheduler can reduce to (reduce_on_plateau scheduler)."),
     "gen.opt.lr_reduce_cooldown": (int, 2, False, "The number of evaluations to wait with"
                                           " checking for improvements after a"
                                           " learning rate reduction on gen"
-                                          " (reduce_on_plateau scheduler)."),# TODO
+                                          " (reduce_on_plateau scheduler)."),
     "gen.opt.lr_reduce_patience": (int, 2, False, "The number of evaluations to wait for"
                                            " improvement of validation scores"
                                            " before reducing the gen learning rate"
-                                           " (reduce_on_plateau scheduler)."),# TODO
+                                           " (reduce_on_plateau scheduler)."),
     "gen.opt.lr_reduce_factor": (float, 0.5, False, "The factor to reduce the gen learning rate"
                                             " with if no validation improvement is"
-                                            " found."), # TODO
+                                            " found."),
     "gen.opt.lr_scheduler": (str, "reduce_on_plateau", False, "The gen learning rate scheduler used: reduce_on_plateau |"
-                                                      " noam (transformers)"), # TODO
+                                                      " noam (transformers)"),
     "gen.opt.lr": (float, 1e-3, False, "The learning rate for gen_z_optimizer."),
     "gen.opt.l2_weight": (float, 0., False, "Strength of L2 regulariser for generative parameters"),
     "gen.opt.style": (str, "adam", False, "Optimizer for generative parameters (options: adam, amsgrad, adadelta, sgd)"),
