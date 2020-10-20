@@ -4,9 +4,9 @@ from torch.distributions import Categorical
 
 def label_smoothing_loss(likelihood: Categorical, target, ignore_index=None):
     """
-    Returns the unweighted label smoothing loss component, as defined in:
+    Returns the unweighted label smoothing loss component, as defined in [1].
 
-    Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna.
+    [1] Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna.
     Rethinking the inception architecture for computer vision.CoRR, abs/1512.00567, 2015.
 
     :param likelihood: Categorical distribution, the likelihood parameterized by the model.

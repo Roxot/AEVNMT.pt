@@ -127,4 +127,3 @@ class Vocabulary:
                     vocab.idx_to_word[idx] = word
 
         return vocab
-

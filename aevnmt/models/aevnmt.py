@@ -141,6 +141,8 @@ class AEVNMT(nn.Module):
         :param aux_lm_likelihoods: a dictionary with LM likelihoods
         :param aux_tm_likelihoods: a dictionary with TM likelihoods
         """
+        out_dict = dict()
+
         # [B]
         tm_log_likelihood = self.translation_model.log_prob(tm_likelihood, targets_y)
         if smoothing_y > 0:
@@ -165,8 +167,11 @@ class AEVNMT(nn.Module):
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-
-        out_dict = dict()
+        # Add MDR constraint.
+        if self.mdr > 0.:
+            mdr_loss = self.mdr_constraint(KL)
+            out_dict[f'constraints/{self.mdr_constraint.name}'] = self.mdr_constraint.multiplier.detach()
+            loss = loss + mdr_loss
         out_dict['KL'] = KL
         out_dict['raw_KL'] = raw_KL
        
@@ -233,11 +238,6 @@ class AEVNMT(nn.Module):
             out_dict['lm/recurrent'] = lm_log_likelihood
             out_dict['tm/recurrent'] = tm_log_likelihood
 
-        # Add MDR constraint.
-        if self.mdr > 0.:
-            mdr_loss = self.mdr_constraint(KL)
-            out_dict['c'] = self.mdr_constraint.multiplier.detach()
-            loss = loss + mdr_loss
 
         # Return differently according to the reduction setting.
         if reduction == "mean":

@@ -40,11 +40,11 @@ def initialize_model(model, pad_idx, cell_type, emb_init_scale, verbose=False):
                 if "attn.in_proj_weight" in name:
                     if verbose:
                         print(f"Initializing {name} with xavier_uniform(gain=1/sqrt(2))")
-                    nn.init.xavier_uniform_(param, gain=1 / math.sqrt(2))
+                    nn.init.xavier_uniform_(param, gain=1. / math.sqrt(2.))
                 elif "attn.out_proj.weight" in name:
                     if verbose:
                         print(f"Initializing {name} with xavier_uniform(gain={xavier_gain})")
-                    nn.init.xavier_uniform_(param)
+                    nn.init.xavier_uniform_(param, gain=xavier_gain)
                 else:
                     if verbose:
                         print(f"Using default initialization for {name}")
