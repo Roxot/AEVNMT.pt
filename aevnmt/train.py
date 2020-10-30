@@ -18,6 +18,8 @@ from aevnmt.data.utils import create_noisy_batch
 from aevnmt.models import initialize_model
 from aevnmt.models.parallel import ParallelWrapper, ParallelAEVNMT, aevnmt_train_parallel
 from aevnmt.opt_utils import construct_optimizers, lr_scheduler_step
+from aevnmt.trainers import AEVNMTTrainer
+from aevnmt.components import loss_functions
 
 import warnings
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -31,10 +33,9 @@ def create_model(hparams, vocab_src, vocab_tgt):
         translate_fn = nmt_helper.translate
     elif hparams.model.type == "aevnmt":
         model = aevnmt_helper.create_model(hparams, vocab_src, vocab_tgt)
-        if hparams.data_parallel:
-            train_fn = aevnmt_train_parallel
-        else:
-            train_fn = aevnmt_helper.train_step
+        loss = aevnmt_helper.create_loss(model, hparams)
+        trainer = AEVNMTTrainer(model, loss)
+        train_fn = trainer.step
         validate_fn = aevnmt_helper.validate
         translate_fn = aevnmt_helper.translate
     else:
@@ -110,8 +111,8 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 sentences_y, vocab_tgt, device,
                 word_dropout=hparams.word_dropout)
             return_dict = train_step(
-                    model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
-                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, 
+                    x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
+                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
                     step, summary_writer=summary_writer)
             loss = return_dict["loss"]
 
@@ -125,7 +126,6 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             if "inf_z" in optimizers: optimizers["inf_z"].step()
             if "lagrangian" in optimizers:
                 optimizers["lagrangian"].step()
-
             # Update statistics.
             num_tokens += (seq_len_x.sum() + seq_len_y.sum()).item()
             num_sentences += x_in.size(0)
@@ -159,6 +159,11 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                        
                 summary_writer.add_scalar("train/loss",
                                           total_train_loss/num_sentences, step)
+                for k, v in return_dict.items():
+                    if "constraint" in k:
+                        summary_writer.add_scalar("train/{}", v.mean(), step)
+                    
+
                 num_tokens = 0
                 tokens_start = time.time()
                 total_train_loss = 0.

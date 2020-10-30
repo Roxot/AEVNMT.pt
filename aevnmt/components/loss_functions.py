@@ -24,10 +24,10 @@ def log_likelihood_loss(likelihood, targets, ll_fn, pad_idx, label_smoothing=0.)
 
 def label_smoothing_loss(likelihood: Categorical, target, ignore_index=None):
     """
-    Returns the unweighted label smoothing loss component, as defined in [1].
+    Returns the unweighted label smoothing loss component, as defined in:
 
-    [1] Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna.
-    Rethinking the inception architecture for computer vision.CoRR, abs/1512.00567, 2015.
+    Christian Szegedy, Vincent Vanhoucke, Sergey Ioffe, Jonathon Shlens, and Zbigniew Wojna.
+    Rethinking the inception architecture for computer vision.
 
     :param likelihood: Categorical distribution, the likelihood parameterized by the model.
     :param target: Target labels
@@ -52,7 +52,44 @@ def mmd_loss(sample_1, sample_2):
         return mmd(sample_1, sample_2, [1. / sample_1.shape[1]])
 
 
-class ELBOLoss:
+class Loss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.num_samples = 1
+
+
+class LogLikelihoodLoss(Loss):
+    def __init__(self, label_smoothing=0.):
+        """
+        A log-likelihood loss with label smoothing, for the NMT model without latent variables.
+
+        :param label_smoothing: [description], defaults to 0.
+        :type label_smoothing: [type], optional
+        """
+        super().__init__()
+        self.label_smoothing = label_smoothing
+
+    def forward(self, likelihood, targets, model, reduction="mean"):
+        out_dict = dict()
+        log_likelihood = log_likelihood_loss(likelihood, targets,
+                                             model.translation_model.log_prob,
+                                             model.translation_model.tgt_embedder.padding_idx,
+                                             self.label_smoothing)
+        loss = - log_likelihood
+
+        if reduction == "mean":
+            out_dict['loss'] = loss.mean()
+        elif reduction == "sum":
+            out_dict['loss'] = loss.sum()
+        elif reduction == "none" or reduction is None:
+            out_dict['loss'] = loss
+        else:
+            raise Exception(f"Unknown reduction option {reduction}")
+
+        return out_dict
+
+
+class ELBOLoss(Loss):
     def __init__(self, kl_weight=1., kl_annealing_steps=0., free_nats=0., mmd_weight=0., label_smoothing_x=0., label_smoothing_y=0.):
         """
         ELBOLoss implements both the ELBO [1] and InfoVAE loss for AEVNMT, by adding a mmd_weight to the regular ELBO.
@@ -67,17 +104,13 @@ class ELBOLoss:
         :param label_smoothing_x: source language label smoothing, defaults to 0.
         :param label_smoothing_y: target language label smoothing, defaults to 0.
         """
+        super().__init__()
         self.kl_weight = kl_weight
         self.kl_annealing_steps = kl_annealing_steps
         self.free_nats = free_nats
-
         self.mmd_weight = mmd_weight
-
         self.label_smoothing_x = label_smoothing_x
         self.label_smoothing_y = label_smoothing_y
-
-        self.num_samples = 1
-
 
     def forward(self, tm_likelihood, lm_likelihood, targets_y, targets_x, qz, pz, sample_qz, step, model, reduction='mean'):
         """
@@ -151,7 +184,7 @@ class ELBOLoss:
 
 
 class InfoVAELoss(ELBOLoss):
-    def __init__(self, info_alpha=1., info_lambda=10., kl_annealing_steps=0., free_nats=0., mmd_weight=0., label_smoothing_x=0., label_smoothing_y=0.):
+    def __init__(self, info_alpha=1., info_lambda=1., kl_annealing_steps=0., free_nats=0., mmd_weight=0., label_smoothing_x=0., label_smoothing_y=0.):
         """
         The InfoVAE objective [2]. As this loss is fully covered by the ELBO implementation,
         the init only determines the correct KL and MMD weights from the InfoVAE parameters.
@@ -165,7 +198,7 @@ class InfoVAELoss(ELBOLoss):
         super().__init__(kl_weight, kl_annealing_steps, free_nats, mmd_weight, label_smoothing_x, label_smoothing_y)
 
 
-class LagVAELoss:
+class LagVAELoss(Loss):
     def __init__(self, alpha, label_smoothing_x=0., label_smoothing_y=0.):
         """
         LagVAE Loss [3]. The bounds for the ELBO and MMD constraints are defined when the constraints are constructed, in aevnmt_helper.py.
@@ -174,6 +207,7 @@ class LagVAELoss:
 
         :param alpha: The scaling parameter that determines which bound is optimized.
         """
+        super().__init__()
         self.alpha = alpha
         if alpha >= 0:
             raise NotImplementedError(f"Minimizing the MI upper bound is not implemented (alpha = {alpha}).")
@@ -181,13 +215,38 @@ class LagVAELoss:
         self.label_smoothing_x = label_smoothing_x
         self.label_smoothing_y = label_smoothing_y
 
-        self.num_samples = 1
-
     def forward(self, tm_likelihood, lm_likelihood, targets_y, targets_x, qz, pz, sample_qz, step, model, reduction='mean'):
-        raise NotImplementedError()
+        out_dict = dict()
+
+        ll_py = log_likelihood_loss(tm_likelihood, targets_y,
+                                    model.translation_model.log_prob,
+                                    model.translation_model.tgt_embedder.padding_idx,
+                                    self.label_smoothing_y)
+        ll_px = log_likelihood_loss(lm_likelihood, targets_x,
+                                    model.language_model.log_prob,
+                                    model.language_model.pad_idx,
+                                    self.label_smoothing_x)
+        ll_total = ll_py + ll_px
+        KL = torch.distributions.kl_divergence(qz, pz)
+        elbo = ll_total - KL
+        mmd = mmd_loss(sample_qz, pz.sample([sample_qz.size(0)]))
+
+        # Main objective
+        loss = - ll_total
+
+        # Add Constraints
+        loss = loss + model.constraints['ELBO'](elbo) + model.constraints['MMD'](mmd)
+
+        out_dict['loss'] = loss
+        out_dict['raw_KL'] = KL.detach()
+        out_dict['tm/main'] = ll_py.detach()
+        out_dict['lm/main'] = ll_px.detach()
+        out_dict['mmd'] = mmd.detach()
+
+        return out_dict
 
 
-class IWAELoss:
+class IWAELoss(Loss):
     def __init__(self, num_samples, label_smoothing_x=0., label_smoothing_y=0.):
         """
         The Importance Weighted Autoencoder (IWAE) objective [4].
@@ -201,13 +260,14 @@ class IWAELoss:
         :param label_smoothing_y: [description], defaults to 0.
         :type label_smoothing_y: [type], optional
         """
+        super().__init__()
         self.num_samples = num_samples
         self.label_smoothing_x = label_smoothing_x
         self.label_smoothing_y = label_smoothing_y
 
     def forward(self, tm_likelihood, lm_likelihood, targets_y, targets_x, qz, pz, sample_qz, step, model, reduction='mean'):
         out_dict = dict()
-        batch_size = sample_qz.shape[0] / self.num_samples
+        batch_size = sample_qz.shape[0] // self.num_samples
 
         # log probabilities [num_samples, batch_size]
         ll_py = log_likelihood_loss(tm_likelihood, targets_y,
@@ -216,26 +276,36 @@ class IWAELoss:
                                     self.label_smoothing_y)
         ll_py = ll_py.view(self.num_samples, batch_size)
         ll_px = log_likelihood_loss(lm_likelihood, targets_x,
-                                    .language_model.log_prob,
-                                    .language_model.pad_idx,
+                                    model.language_model.log_prob,
+                                    model.language_model.pad_idx,
                                     self.label_smoothing_x)
         ll_px = ll_px.view(self.num_samples, batch_size)
 
         sample_qz = sample_qz.view(self.num_samples, batch_size, -1)
-        logprob_qz = qz.log_prob(sample_qz).sum(-1)
-        logprob_pz = pz.log_prob(sample_qz).sum(-1)
+        logprob_qz = qz.log_prob(sample_qz)
+        logprob_pz = pz.log_prob(sample_qz)
 
         # Importance weights
         log_w = ll_px + ll_py + logprob_pz - logprob_qz
         raw_loss = torch.logsumexp(log_w, dim=0) - math.log(self.num_samples)
 
-        # Loss with normalized importance weights
+        # Loss with normalized importance weights (See Burda et al. (14))
         w_norm = torch.softmax(log_w, dim=0)
-        loss = torch.sum(w_norm.detach() * log_w, dim=0)
+        loss = - torch.sum(w_norm.detach() * log_w, dim=0)
 
-        out_dict['loss'] = loss
-        out_dict['raw_loss'] = raw_loss.detach()
-        out_dict['tm/main'] = torch.logsumexp(ll_py, dim=0).detach()
-        out_dict['lm/main'] = torch.logsumexp(ll_px, dim=0).detach()
+        if reduction == "mean":
+            out_dict['loss'] = loss.mean()
+        elif reduction == "sum":
+            out_dict['loss'] = loss.sum()
+        elif reduction == "none" or reduction is None:
+            out_dict['loss'] = loss
+        else:
+            raise Exception(f"Unknown reduction option {reduction}")
+
+        with torch.no_grad():
+            out_dict['raw_KL'] = torch.distributions.kl_divergence(qz, pz)
+            out_dict['IWAE_loss'] = raw_loss.detach()
+            out_dict['tm/main'] = torch.logsumexp(ll_py + logprob_pz - logprob_qz, dim=0)
+            out_dict['lm/main'] = torch.logsumexp(ll_px + logprob_pz - logprob_qz, dim=0)
 
         return out_dict

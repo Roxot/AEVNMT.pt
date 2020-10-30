@@ -13,7 +13,7 @@ from probabll.distributions import ProductOfDistributions
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
-from aevnmt.components import DetachedEmbeddingLayer, RNNEncoder, beam_search, greedy_decode, sampling_decode
+from aevnmt.components import DetachedEmbeddingLayer, RNNEncoder, beam_search, greedy_decode, sampling_decode, Constraint, loss_functions
 from aevnmt.models import AEVNMT
 from aevnmt.models.generative import GenerativeLM, IndependentLM, CorrelatedBernoullisLM
 from aevnmt.models.generative import CorrelatedCategoricalsLM, CorrelatedPoissonsLM
@@ -295,6 +295,30 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
     return inf_model
 
 
+def create_constraints(hparams):
+    constraints = dict()
+
+    if hparams.loss.type == "ELBO":
+        if hparams.loss.ELBO.mdr > 0:
+            constraints['MDR'] = Constraint(hparams.loss.ELBO.mdr, 'ge', name='MDR')
+
+    elif hparams.loss.type == "InfoVAE":
+        # Add optional InfoVAE constraints here.
+        pass
+
+    elif hparams.loss.type == "LagVAE":
+        constraints['ELBO'] = Constraint(hparams.loss.LagVAE.min_ELBO, 'ge', name='ELBO')
+        constraints['MMD'] = Constraint(hparams.loss.LagVAE.min_mmd, 'ge', name='MMD')
+
+    elif hparams.loss.type == "IWAE":
+        pass
+
+    else:
+        raise ValueError(f"Unknown loss type: {hparams.loss.type}")
+
+    return constraints
+
+
 def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
@@ -332,6 +356,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
         latent_sizes,
         hparams)
 
+    constraints = create_constraints(hparams)
+
     model = AEVNMT(
         latent_size=hparams.prior.latent_size,
         src_embedder=src_embedder,
@@ -343,15 +369,49 @@ def create_model(hparams, vocab_src, vocab_tgt):
         feed_z=None,
         tied_embeddings=None,
         prior=priors[0] if len(priors) == 1 else ProductOfPriorsLayer(priors),
-        mdr=hparams.kl.mdr,
+        constraints=constraints,
         aux_lms=aux_lms,
         aux_tms=aux_tms,
         mixture_likelihood=hparams.likelihood.mixture,
         mixture_likelihood_dir_prior=hparams.likelihood.mixture_dir_prior)
     return model
 
-def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
-               hparams, step, summary_writer=None):
+
+def create_loss(model, hparams):
+    print(hparams.loss.type)
+    if hparams.loss.type == "ELBO":
+        loss = loss_functions.ELBOLoss(
+            kl_weight=hparams.loss.ELBO.beta,
+            kl_annealing_steps=hparams.loss.ELBO.kl_annealing_steps,
+            free_nats=hparams.loss.ELBO.free_nats,
+            label_smoothing_x=hparams.gen.lm.label_smoothing,
+            label_smoothing_y=hparams.gen.tm.label_smoothing)
+    elif hparams.loss.type == "InfoVAE":
+        loss = loss_functions.InfoVAELoss(
+            info_alpha=hparams.loss.InfoVAE.alpha,
+            info_lambda=hparams.loss.InfoVAE.lamb,
+            label_smoothing_x=hparams.gen.lm.label_smoothing,
+            label_smoothing_y=hparams.gen.tm.label_smoothing
+        )
+    elif hparams.loss.type == "LagVAE":
+        loss = loss_functions.LagVAELoss(
+            alpha=hparams.loss.LagVAE.alpha,
+            label_smoothing_x=hparams.gen.lm.label_smoothing,
+            label_smoothing_y=hparams.gen.tm.label_smoothing
+        )
+    elif hparams.loss.type == "IWAE":
+        loss = loss_functions.IWAELoss(
+            num_samples=hparams.loss.IWAE.num_samples,
+            label_smoothing_x=hparams.gen.lm.label_smoothing,
+            label_smoothing_y=hparams.gen.tm.label_smoothing
+        )
+    else:
+        raise ValueError(f"Unknown loss type: {hparams.loss.type}")
+    return loss
+
+def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, 
+               seq_mask_y, seq_len_y, noisy_y_in, hparams, step, summary_writer=None):
+
 
     # Use q(z|x) for training to sample a z.
     qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
@@ -361,10 +421,9 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
     # Do linear annealing of the KL over KL_annealing_steps if set.
+    KL_weight = hparams.kl.weight
     if hparams.kl.annealing_steps > 0:
-        KL_weight = min(1., (1.0 / hparams.kl.annealing_steps) * step)
-    else:
-        KL_weight = 1.
+        KL_weight = min(KL_weight, (KL_weight / hparams.kl.annealing_steps) * step)
 
     # Compute the loss.
     loss_cfg = None
@@ -381,6 +440,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     loss = model.loss(tm_likelihood, lm_likelihood, y_out, x_out, qz,
                       free_nats=hparams.kl.free_nats,
                       KL_weight=KL_weight,
+                      mmd_weight=hparams.loss.mmd_weight,
                       reduction="mean",
                       smoothing_x=hparams.gen.lm.label_smoothing,
                       smoothing_y=hparams.gen.tm.label_smoothing,

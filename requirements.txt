@@ -1,5 +1,5 @@
 matplotlib
-torch==1.2.0
+torch
 numpy
 tensorboardX==1.6
 Pillow

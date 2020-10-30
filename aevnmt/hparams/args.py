@@ -216,10 +216,29 @@ decoding_args = {
     "decoding.max_length": (int, 50, False, "Maximum decoding length"),
 }
 
-kl_args = {
-    "kl.free_nats": (float, 0., False, "KL = min(KL_free_nats, KL)"),
-    "kl.annealing_steps": (int, 0, False, "Amount of KL annealing steps (0...1)"),
-    "kl.mdr": (float, -1., False, "If positive adds a soft Lagrangian constraint for the KL term to minimally achieve the given value."),
+loss_args = {
+    "loss.type": (str, "ELBO", False, "Type of training objective. likelihood|ELBO|InfoVAE|LagVAE|IWVAE"),
+
+    "loss.ELBO.beta": (float, 1., False, "Weight of the ELBO KL term."),
+    "loss.ELBO.free_nats": (float, 0., False, "KL = min(free_nats, KL)"),
+    "loss.ELBO.kl_annealing_steps": (int, 0, False, "Amount of KL annealing steps (0...1)"),
+    "loss.ELBO.mdr": (float, 0., False, "Adds a minimum desired rate by putting a lagrangian constraint for the KL on the ELBO."),
+
+    "loss.InfoVAE.alpha": (float, 0., False, "Relative weight of the KL and MMD terms."),
+    "loss.InfoVAE.lamb": (float, 0., False, "Scaling of the InfoVAE MMD term."),
+
+    "loss.LagVAE.min_elbo": (float, 0., False, "LagVAE bound for KL(q(x, z) || p(x, z))"),
+    "loss.LagVAE.min_mmd": (float, 0., False, "LagVAE bound for MMD(q(z) || p(z))"),
+    "loss.LagVAE.alpha": (float, -1., False, "LagVAE parameter that specifies maximization/minimization of the mutual information bound."),
+
+    "loss.IWAE.num_samples": (int, 10, False, "Number of MC estimate samples for the IWAE objective."),
+
+    # "kl.weight": (float, 1., False, "Weight of the KL-divergence in the AEVNMT loss."),
+    # "kl.free_nats": (float, 0., False, "KL = min(KL_free_nats, KL)"),
+    # "kl.annealing_steps": (int, 0, False, "Amount of KL annealing steps (0...1)"),
+    # "loss.mdr": (float, 0., False, "Bound of th KL constraint, used when the value is larger than 0."),
+    # "loss.mmd_weight": (float, 0., False, "Weight of the MMD term in the AEVNMT loss."),
+    # "loss.mmd_constraint": (float, 0., False, "Bound of the MMD constraint, used when the value larger than 0.")
 }
 
 translation_args = {
@@ -255,7 +274,7 @@ arg_groups = {
     "Aux Losses": aux_args,
     "Optimization": opt_args,
     "Decoding": decoding_args,
-    "KL": kl_args,
+    "Loss": loss_args,
     "Translation": translation_args
 }
 

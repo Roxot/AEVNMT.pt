@@ -51,7 +51,8 @@ class AEVNMTTrainer:
             x_out = self._repeat_over_samples(x_out, self.loss.num_samples, flatten=True)
             y_out = self._repeat_over_samples(y_out, self.loss.num_samples, flatten=True)
 
-        tm_likelihood, lm_likelihood = self.model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
+        # TODO aux likelihoods are not used in the new Loss functions.
+        tm_likelihood, lm_likelihood, _, _, _ = self.model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
         loss_dict = self.loss(tm_likelihood, lm_likelihood, y_out, x_out, q_z, p_z, z, step, self.model, reduction='mean')
 
