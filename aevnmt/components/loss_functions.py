@@ -156,7 +156,8 @@ class ELBOLoss(Loss):
             sample_pz = pz.sample([sample_qz.size(0)])
             mmd = mmd_loss(sample_qz, sample_pz)
             out_dict['MMD'] = mmd
-            # NOTE the loss is the negative ELBO, subtract MMD instead of adding.
+            # NOTE the loss is the negative ELBO,
+            # -(ELBO + MMD) == - ELBO - MMD
             loss = loss - mmd * self.mmd_weight
 
         # Constraints
@@ -228,16 +229,24 @@ class LagVAELoss(Loss):
                                     self.label_smoothing_x)
         ll_total = ll_py + ll_px
         KL = torch.distributions.kl_divergence(qz, pz)
-        elbo = ll_total - KL
+        neg_elbo = KL - ll_total
         mmd = mmd_loss(sample_qz, pz.sample([sample_qz.size(0)]))
 
         # Main objective
         loss = - ll_total
 
         # Add Constraints
-        loss = loss + model.constraints['ELBO'](elbo) + model.constraints['MMD'](mmd)
+        loss = loss + model.constraints['ELBO'](neg_elbo) + model.constraints['MMD'](mmd)
 
-        out_dict['loss'] = loss
+        if reduction == "mean":
+            out_dict['loss'] = loss.mean()
+        elif reduction == "sum":
+            out_dict['loss'] = loss.sum()
+        elif reduction == "none" or reduction is None:
+            out_dict['loss'] = loss
+        else:
+            raise Exception(f"Unknown reduction option {reduction}")
+        
         out_dict['raw_KL'] = KL.detach()
         out_dict['tm/main'] = ll_py.detach()
         out_dict['lm/main'] = ll_px.detach()

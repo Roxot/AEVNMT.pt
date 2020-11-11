@@ -23,6 +23,7 @@ class AEVNMTTrainer:
             return tensor_exp
 
     def _flatten_samples(self, tensor):
+        """[num_samples, B, ...] -> [num_samples * B, ...]"""
         if tensor is not None:
             return tensor.view(tensor.shape[0] * tensor.shape[1], *tensor.shape[2:])
 
@@ -76,6 +77,6 @@ class NMTTrainer:
 
     def step(self, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out,
              seq_mask_y, seq_len_y, noisy_y_in, step, summary_writer=None):
-        likelihood, _ = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in)
-        loss_dict = self.loss(likelihood, y_out, reduction="mean")
+        likelihood, _ = self.model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in)
+        loss_dict = self.loss(likelihood, y_out, self.model, reduction="mean")
         return loss_dict

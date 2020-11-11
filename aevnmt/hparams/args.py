@@ -155,6 +155,7 @@ opt_args = {
     # General
     "num_epochs": (int, 1, False, "The number of epochs to train the model for."),
     "batch_size": (int, 64, False, "The batch size."),
+    "update_freq": (int, 1, False, "Accumulate gradients and update model parameters every N steps."),
     "print_every": (int, 100, False, "Print training statistics every x steps."),
     "max_gradient_norm": (float, 5.0, False, "The maximum gradient norm to clip the"
                                              " gradients to, to disable"
@@ -227,8 +228,8 @@ loss_args = {
     "loss.InfoVAE.alpha": (float, 0., False, "Relative weight of the KL and MMD terms."),
     "loss.InfoVAE.lamb": (float, 0., False, "Scaling of the InfoVAE MMD term."),
 
-    "loss.LagVAE.min_elbo": (float, 0., False, "LagVAE bound for KL(q(x, z) || p(x, z))"),
-    "loss.LagVAE.min_mmd": (float, 0., False, "LagVAE bound for MMD(q(z) || p(z))"),
+    "loss.LagVAE.max_elbo": (float, 0., False, "LagVAE bound for KL(q(x, z) || p(x, z))"),
+    "loss.LagVAE.max_mmd": (float, 0., False, "LagVAE bound for MMD(q(z) || p(z))"),
     "loss.LagVAE.alpha": (float, -1., False, "LagVAE parameter that specifies maximization/minimization of the mutual information bound."),
 
     "loss.IWAE.num_samples": (int, 10, False, "Number of MC estimate samples for the IWAE objective."),

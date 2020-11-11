@@ -307,8 +307,8 @@ def create_constraints(hparams):
         pass
 
     elif hparams.loss.type == "LagVAE":
-        constraints['ELBO'] = Constraint(hparams.loss.LagVAE.min_ELBO, 'ge', name='ELBO')
-        constraints['MMD'] = Constraint(hparams.loss.LagVAE.min_mmd, 'ge', name='MMD')
+        constraints['ELBO'] = Constraint(hparams.loss.LagVAE.max_elbo, 'le', name='ELBO')
+        constraints['MMD'] = Constraint(hparams.loss.LagVAE.max_mmd, 'le', name='MMD')
 
     elif hparams.loss.type == "IWAE":
         pass
@@ -329,6 +329,8 @@ def create_model(hparams, vocab_src, vocab_tgt):
     # Auxiliary generative components
     aux_lms = create_aux_language_models(vocab_src, src_embedder, hparams)
     aux_tms = create_aux_translation_models(src_embedder, tgt_embedder, hparams)
+    if aux_lms or aux_tms:
+        raise NotImplementedError("Aux losses are not yet supported with the new loss functions. See Issue #17.")
     
     translation_model = create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams)
    
@@ -377,8 +379,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
     return model
 
 
-def create_loss(model, hparams):
-    print(hparams.loss.type)
+def create_loss(hparams):
     if hparams.loss.type == "ELBO":
         loss = loss_functions.ELBOLoss(
             kl_weight=hparams.loss.ELBO.beta,
@@ -406,7 +407,7 @@ def create_loss(model, hparams):
             label_smoothing_y=hparams.gen.tm.label_smoothing
         )
     else:
-        raise ValueError(f"Unknown loss type: {hparams.loss.type}")
+        raise ValueError(f"Invalid loss type: {hparams.loss.type}")
     return loss
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, 

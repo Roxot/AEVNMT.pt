@@ -3,7 +3,7 @@ import numpy as np
 
 from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
-from aevnmt.components import RNNEncoder, TransformerEncoder, beam_search, greedy_decode, sampling_decode, ancestral_sample
+from aevnmt.components import RNNEncoder, TransformerEncoder, beam_search, greedy_decode, sampling_decode, ancestral_sample, loss_functions
 from aevnmt.models import ConditionalNMT
 from aevnmt.models.generative import AttentionBasedTM, TransformerTM
 from .train_utils import create_encoder, create_attention, create_decoder, attention_summary, compute_bleu
@@ -49,6 +49,11 @@ def create_model(hparams, vocab_src, vocab_tgt):
 
     model = ConditionalNMT(translation_model)
     return model
+
+def create_loss(hparams):
+    if hparams.loss.type != "LL":
+        print(f"Warning: {hparams.loss.type} is an invalid loss type for NMT. Using log likelihood loss instead")
+    return loss_functions.LogLikelihoodLoss(label_smoothing=hparams.gen.tm.label_smoothing)
 
 def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
                hparams, step, summary_writer=None):
