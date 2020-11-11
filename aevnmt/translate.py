@@ -121,6 +121,7 @@ class TranslationEngine:
             print(f"Restoring model selected wrt {self.hparams.criterion} from {self.model_checkpoint}", file=sys.stderr)
 
         model, _, _, translate_fn = create_model(self.hparams, self.vocab_src, self.vocab_tgt)
+        
         if self.hparams.use_gpu:
             model.load_state_dict(torch.load(self.model_checkpoint))
         else:

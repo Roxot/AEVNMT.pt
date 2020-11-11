@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.distributions import Distribution, Categorical 
 
 from aevnmt.dist import PriorLayer, get_named_params
-from aevnmt.components import label_smoothing_loss, MDRConstraint
+from aevnmt.components import label_smoothing_loss, Constraint, mmd_loss
 
 from .generative import GenerativeLM, GenerativeTM
 from .inference import InferenceModel
@@ -21,7 +21,7 @@ class AEVNMT(nn.Module):
             prior: PriorLayer,
             dropout, tied_embeddings,
             feed_z=False,
-            mdr=-1.,
+            constraints=dict(),
             aux_lms: Dict[str, GenerativeLM]=dict(), aux_tms: Dict[str, GenerativeTM]=dict(),
             mixture_likelihood=False, mixture_likelihood_dir_prior=0.0):
         super().__init__()
@@ -34,13 +34,12 @@ class AEVNMT(nn.Module):
 
         self.mixture_likelihood = mixture_likelihood
         self.mixture_likelihood_dir_prior = mixture_likelihood_dir_prior
+
         # Auxiliary LMs and TMs
         self.aux_lms = nn.ModuleDict(aux_lms)
         self.aux_tms = nn.ModuleDict(aux_tms)
 
-        self.mdr = mdr
-        if self.mdr > 0.:
-            self.mdr_constraint = MDRConstraint(self.mdr)
+        self.constraints = nn.ModuleDict(constraints)
 
         # This is done because the location and scale of the prior distribution are not considered
         # parameters, but are rather constant. Registering them as buffers still makes sure that
@@ -69,8 +68,8 @@ class AEVNMT(nn.Module):
         return chain(self.tgt_embedder.parameters(), self.translation_model.parameters())
    
     def lagrangian_parameters(self):
-        if self.mdr > 0.:
-            return self.mdr_constraint.parameters()
+        if self.constraints:
+            return self.constraints.parameters()
         return None
 
     def approximate_posterior(self, x, seq_mask_x, seq_len_x, y, seq_mask_y, seq_len_y):
@@ -123,7 +122,7 @@ class AEVNMT(nn.Module):
         return self.aux_lms[comp_name].log_prob(likelihood, x)
 
     def loss(self, tm_likelihood: Categorical, lm_likelihood: Categorical, targets_y, targets_x, qz: Distribution, 
-            free_nats=0., KL_weight=1., smoothing_x=0., smoothing_y=0., reduction="mean", aux_lm_likelihoods=dict(), 
+            free_nats=0., KL_weight=1., mmd_weight=0., smoothing_x=0., smoothing_y=0., reduction="mean", aux_lm_likelihoods=dict(),
             aux_tm_likelihoods=dict(), loss_cfg=set()):
         """
         Computes an estimate of the negative evidence lower bound for the single sample of the latent
@@ -167,14 +166,7 @@ class AEVNMT(nn.Module):
         if free_nats > 0:
             KL = torch.clamp(KL, min=free_nats)
         KL *= KL_weight
-        # Add MDR constraint.
-        if self.mdr > 0.:
-            mdr_loss = self.mdr_constraint(KL)
-            out_dict[f'constraints/{self.mdr_constraint.name}'] = self.mdr_constraint.multiplier.detach()
-            loss = loss + mdr_loss
-        out_dict['KL'] = KL
-        out_dict['raw_KL'] = raw_KL
-       
+
         # Alternative views of p(x|z)
         # [Cx, B]
         side_lm_likelihood = torch.zeros([len(aux_lm_likelihoods), KL.size(0)], dtype=KL.dtype, device=KL.device)
@@ -190,7 +182,7 @@ class AEVNMT(nn.Module):
 
         if not self.mixture_likelihood:
             # ELBO
-            #  E_q[ \log P(x|z,c=main) P(y|z,x,c=main)] - KL(q(z) || p(z)) 
+            #  E_q[ \log P(x|z,c=main) P(y|z,x,c=main)] - KL(q(z) || p(z))
             #  + E_q[\sum_{c not main} log P(x|z,c) + log P(y|z,x,c) ]
             # where the second row are heuristic side losses (we can think of it as multitask learning)
             elbo = tm_log_likelihood + lm_log_likelihood - KL
@@ -237,6 +229,29 @@ class AEVNMT(nn.Module):
             out_dict['tm/main'] = tm_mixture
             out_dict['lm/recurrent'] = lm_log_likelihood
             out_dict['tm/recurrent'] = tm_log_likelihood
+
+        # MMD between q(z|x) and the prior, for the InfoVAE or LagVAE objectives.
+        # if mmd_weight > 0. or self.min_mmd > 0:
+        #     sample_z = qz.rsample()
+        #     sample_prior = pz.sample([sample_z.size(0)])
+        #     mmd = mmd_loss(sample_z, sample_prior)
+        #     out_dict['MMD'] = mmd
+        # if mmd_weight > 0.:
+        #     loss = loss + mmd * mmd_weight
+        # if 'MMD' in self.constraints > 0.:
+        #     mmd_constraint_loss = self.mmd_constraint(mmd)
+        #     loss = loss + mmd_constraint_loss
+        #     out_dict[f'constraints/multipliers/{self.mmd_constraint.name}'] = self.mmd_constraint.multiplier.detach()
+        
+
+        # MDR constraint.
+        if 'MDR' in self.constraints:
+            mdr_loss = self.constraints['MDR'](KL)
+            loss = loss + mdr_loss
+            out_dict[f'constraints/multipliers/{self.mdr_constraint.name}'] = self.mdr_constraint.multiplier.detach()
+
+        out_dict['KL'] = KL
+        out_dict['raw_KL'] = raw_KL
 
 
         # Return differently according to the reduction setting.

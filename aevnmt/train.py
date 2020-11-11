@@ -18,38 +18,32 @@ from aevnmt.data.utils import create_noisy_batch
 from aevnmt.models import initialize_model
 from aevnmt.models.parallel import ParallelWrapper, ParallelAEVNMT, aevnmt_train_parallel
 from aevnmt.opt_utils import construct_optimizers, lr_scheduler_step
-
-import warnings
-warnings.simplefilter(action='ignore', category=UserWarning)
+from aevnmt.trainers import AEVNMTTrainer, NMTTrainer
+from aevnmt.components import loss_functions
 
 
 def create_model(hparams, vocab_src, vocab_tgt):
     if hparams.model.type == "cond_nmt":
         model = nmt_helper.create_model(hparams, vocab_src, vocab_tgt)
-        train_fn = nmt_helper.train_step
+        loss = nmt_helper.create_loss(hparams)
+        trainer = NMTTrainer(model, loss)
         validate_fn = nmt_helper.validate
         translate_fn = nmt_helper.translate
     elif hparams.model.type == "aevnmt":
         model = aevnmt_helper.create_model(hparams, vocab_src, vocab_tgt)
-        if hparams.data_parallel:
-            train_fn = aevnmt_train_parallel
-        else:
-            train_fn = aevnmt_helper.train_step
+        loss = aevnmt_helper.create_loss(hparams)
+        trainer = AEVNMTTrainer(model, loss)
         validate_fn = aevnmt_helper.validate
         translate_fn = aevnmt_helper.translate
     else:
         raise Exception(f"Unknown model_type: {hparams.model.type}")
 
-    return model, train_fn, validate_fn, translate_fn
+    return model, trainer, validate_fn, translate_fn
 
 
-def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
-          vocab_tgt, device, out_dir, train_step, validate, hparams):
+def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src,
+          vocab_tgt, device, out_dir, validate, hparams):
     """
-    :param train_step: function that performs a single training step and returns
-                       training loss. Takes as inputs: model, x_in, x_out,
-                       seq_mask_x, seq_len_x, y_in, y_out, seq_mask_y,
-                       seq_len_y, hparams, step.
     :param validate: function that performs validation and returns validation
                      BLEU, used for model selection. Takes as inputs: model,
                      val_data, vocab, device, hparams, step, summary_writer.
@@ -58,6 +52,8 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                      summaries and write any validation metrics to the
                      standard out.
     """
+
+    model = trainer.model
 
     # Create a dataloader that buckets the batches.
     dl = DataLoader(training_data, batch_size=hparams.batch_size,
@@ -109,9 +105,9 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
             y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in = create_noisy_batch(
                 sentences_y, vocab_tgt, device,
                 word_dropout=hparams.word_dropout)
-            return_dict = train_step(
-                    model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
-                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in, hparams, 
+            return_dict = trainer.step(
+                    x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
+                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
                     step, summary_writer=summary_writer)
             loss = return_dict["loss"]
 
@@ -121,11 +117,12 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                 # TODO: do we need separate norms?
                 nn.utils.clip_grad_norm_(model.parameters(),
                                          hparams.max_gradient_norm)
-            optimizers["gen"].step()
-            if "inf_z" in optimizers: optimizers["inf_z"].step()
-            if "lagrangian" in optimizers:
-                optimizers["lagrangian"].step()
-
+            if (step + 1) % hparams.update_freq == 0:
+                optimizers["gen"].step()
+                if "inf_z" in optimizers: 
+                    optimizers["inf_z"].step()
+                if "lagrangian" in optimizers:
+                    optimizers["lagrangian"].step()
             # Update statistics.
             num_tokens += (seq_len_x.sum() + seq_len_y.sum()).item()
             num_sentences += x_in.size(0)
@@ -159,15 +156,21 @@ def train(model, optimizers, lr_schedulers, training_data, val_data, vocab_src,
                        
                 summary_writer.add_scalar("train/loss",
                                           total_train_loss/num_sentences, step)
+                for k, v in return_dict.items():
+                    if "constraint" in k:
+                        summary_writer.add_scalar("train/{}", v.mean(), step)
+                    
+
                 num_tokens = 0
                 tokens_start = time.time()
                 total_train_loss = 0.
                 num_sentences = 0
 
-            # Zero the gradient buffer.
-            optimizers["gen"].zero_grad()
-            if "inf_z" in optimizers: optimizers["inf_z"].zero_grad()
-            if "lagrangian" in optimizers: optimizers["lagrangian"].zero_grad()
+            if (step + 1) % hparams.update_freq == 0:
+                # Zero the gradient buffer every update_freq steps
+                optimizers["gen"].zero_grad()
+                if "inf_z" in optimizers: optimizers["inf_z"].zero_grad()
+                if "lagrangian" in optimizers: optimizers["lagrangian"].zero_grad()
 
             # Update the learning rate scheduler if needed.
             lr_scheduler_step(lr_schedulers, hparams)
@@ -221,16 +224,15 @@ def main():
     print(f"Validation data: {len(val_data):,} bilingual sentence pairs")
 
     # Create the language model and load it onto the GPU if set to do so.
-    model, train_fn, validate_fn, _ = create_model(hparams, vocab_src, vocab_tgt)
-    if hparams.data_parallel:
-        model = ParallelAEVNMT(model, hparams)
-        model = ParallelWrapper(model)
+    model, trainer, validate_fn, _ = create_model(hparams, vocab_src, vocab_tgt)
+
     optimizers, lr_schedulers = construct_optimizers(
         hparams,
         gen_parameters=model.generative_parameters(),
         inf_z_parameters=model.inference_parameters(),
         lagrangian_parameters=model.lagrangian_parameters())
     device = torch.device("cuda:0") if hparams.use_gpu else torch.device("cpu")
+
     model = model.to(device)
 
     # Print information about the model.
@@ -267,8 +269,8 @@ def main():
     # Train the model.
     print("\n==== Starting training")
     print(f"Using device: {device}\n")
-    train(model, optimizers, lr_schedulers, train_data, val_data, vocab_src,
-          vocab_tgt, device, out_dir, train_fn, validate_fn, hparams)
+    train(trainer, optimizers, lr_schedulers, train_data, val_data, vocab_src,
+          vocab_tgt, device, out_dir, validate_fn, hparams)
 
 if __name__ == "__main__":
     main()
