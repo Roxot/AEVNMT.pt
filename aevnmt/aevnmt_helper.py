@@ -152,7 +152,7 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
         tms['bow'] = IndependentTM(
             latent_size=hparams.prior.latent_size,
             embedder=tgt_embedder,
-            tied_embeddings=hparams.gen.tm.dec.tied_embeddings)  
+            tied_embeddings=hparams.gen.tm.dec.tied_embeddings)
     if hparams.aux.MADE_tl:
         tms['made'] = CorrelatedBernoullisTM(
             vocab_size=tgt_embedder.num_embeddings,
@@ -160,16 +160,16 @@ def create_aux_translation_models(src_embedder, tgt_embedder, hparams) -> Dict[s
             hidden_sizes=[hparams.aux.hidden_size, hparams.aux.hidden_size],
             pad_idx=tgt_embedder.padding_idx,
             num_masks=1,
-            resample_mask_every=0) 
+            resample_mask_every=0)
     if hparams.aux.count_MADE_tl:
         tms['count_made'] = CorrelatedPoissonsTM(
-            vocab_size=tgt_embedder.num_embeddings, 
-            latent_size=hparams.prior.latent_size, 
+            vocab_size=tgt_embedder.num_embeddings,
+            latent_size=hparams.prior.latent_size,
             hidden_sizes=[hparams.aux.hidden_size, hparams.aux.hidden_size],
             pad_idx=tgt_embedder.padding_idx,
             num_masks=1,
-            resample_mask_every=0) 
-    if hparams.aux.shuffle_lm_tl: 
+            resample_mask_every=0)
+    if hparams.aux.shuffle_lm_tl:
         raise NotImplementedError("This is not yet supported")
     if hparams.aux.ibm1:
         tms['ibm1'] = IBM1TM(
@@ -237,8 +237,8 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             transformer_layers=hparams.inf.transformer.num_layers,
             transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
-            nli_max_distance=20,  # TODO: generalise 
-            dropout=hparams.dropout, 
+            nli_max_distance=20,  # TODO: generalise
+            dropout=hparams.dropout,
             composition=hparams.inf.composition)
         encoder_y = get_inference_encoder(
             encoder_style=enc_styles[1],
@@ -253,8 +253,8 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
             transformer_layers=hparams.inf.transformer.num_layers,
             transformer_hidden=hparams.inf.transformer.hidden_size,
             nli_shared_size=hparams.emb.size,
-            nli_max_distance=20,  # TODO: generalise 
-            dropout=hparams.dropout, 
+            nli_max_distance=20,  # TODO: generalise
+            dropout=hparams.dropout,
             composition=hparams.inf.composition)
         if enc_styles[2] == 'comb':
             encoder_xy = combine_inference_encoders(encoder_x, encoder_y, hparams.inf.inf3_comb_composition)
@@ -272,8 +272,8 @@ def create_inference_model(src_embedder, tgt_embedder, latent_sizes, hparams) ->
                 transformer_layers=hparams.inf.transformer.num_layers,
                 transformer_hidden=hparams.inf.transformer.hidden_size,
                 nli_shared_size=hparams.emb.size,
-                nli_max_distance=20,  # TODO: generalise 
-                dropout=hparams.dropout, 
+                nli_max_distance=20,  # TODO: generalise
+                dropout=hparams.dropout,
                 composition=hparams.inf.composition)
         inf_model = SwitchingInferenceModel(
             BasicInferenceModel(
@@ -373,17 +373,17 @@ def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
     tgt_embedder = torch.nn.Embedding(vocab_tgt.size(), hparams.emb.size, padding_idx=vocab_tgt[PAD_TOKEN])
-    
+
     language_model = create_language_model(vocab_src, src_embedder, hparams)
-    
+
     # Auxiliary generative components
     aux_lms = create_aux_language_models(vocab_src, src_embedder, hparams)
     aux_tms = create_aux_translation_models(src_embedder, tgt_embedder, hparams)
     if aux_lms or aux_tms:
         raise NotImplementedError("Aux losses are not yet supported with the new loss functions. See Issue #17.")
-    
+
     translation_model = create_translation_model(vocab_tgt, src_embedder, tgt_embedder, hparams)
-   
+
     priors = []
     n_priors = len(hparams.prior.family.split(";"))
     if hparams.prior.latent_sizes:
@@ -460,14 +460,14 @@ def create_loss(hparams):
         raise ValueError(f"Invalid loss type: {hparams.loss.type}")
     return loss
 
-def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out, 
+def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_out,
                seq_mask_y, seq_len_y, noisy_y_in, hparams, step, summary_writer=None):
 
 
     # Use q(z|x) for training to sample a z.
     qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
     z = qz.rsample()
- 
+
     # Compute the translation and language model logits.
     tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(noisy_x_in, seq_mask_x, seq_len_x, noisy_y_in, z)
 
@@ -486,7 +486,7 @@ def train_step(model, x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in, y_in, y_ou
     #    loss_cfg = {'lm/made', 'lm/made_count', 'tm/made', 'tm/made_count'}
     #elif step < 4500:
     #    loss_cfg = {'lm/made', 'lm/made_count', 'lm/main', 'tm/made', 'tm/made_count', 'tm/main'}
-    #else: 
+    #else:
     #    loss_cfg = {'lm/main', 'tm/main'}
     loss = model.loss(tm_likelihood, lm_likelihood, y_out, x_out, qz,
                       free_nats=hparams.kl.free_nats,
@@ -539,12 +539,12 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     for comp_name, comp_nll in sorted(val_NLLs.items()):
         if comp_name.startswith('tm/'):
             nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
-    
+
     kl_str = f"-- KL = {val_KL.sum():.2f}"
     if isinstance(model.prior(), ProductOfDistributions):
         for i, p in enumerate(model.prior().distributions):
-            kl_str += f" -- KL{i} = {val_KL[i]:.2f}" 
-        
+            kl_str += f" -- KL{i} = {val_KL[i]:.2f}"
+
     print(f"direction = {title}\n"
           f"validation perplexity = {val_ppl:,.2f}"
           f" -- BLEU = {val_bleu:.2f}"
@@ -564,7 +564,7 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
         print(f"- Reference: {r[0]}")
         for h in hs:
             print(f"- Translation: {h}")
-    
+
     # Write validation summaries.
     if summary_writer is not None:
         summary_writer.add_scalar(f"{title}/validation/BLEU", val_bleu, step)
@@ -677,8 +677,8 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
 
         else:
             raw_hypothesis = beam_search(
-                model.translation_model.decoder, 
-                model.translation_model.tgt_embed, 
+                model.translation_model.decoder,
+                model.translation_model.tgt_embed,
                 model.translation_model.generate,
                 vocab_tgt.size(), hidden, encoder_outputs,
                 encoder_final, seq_mask_x, seq_len_x,
@@ -690,6 +690,50 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
+
+#TODO: change me
+def generate_senvae(model, num_samples, vocab_src, device, hparams, deterministic=True):
+
+    model.eval()
+    with torch.no_grad():
+        qz=model.prior().expand((num_samples,))
+
+        # TODO: restore some form of deterministic decoding
+        #z = qz.mean if deterministic else qz.sample()
+        z = qz.sample()
+
+        if isinstance(model.translation_model, TransformerTM):
+            encoder_outputs, seq_len_x = model.translation_model.encode(x_in, seq_len_x, z)
+            encoder_final = None
+            hidden = None
+        else:
+            encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
+            hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
+
+        if hparams.decoding.sample:
+            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+               max_len=hparams.decoding.max_length, greedy=False)
+
+        elif hparams.decoding.beam_width <= 1:
+            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+               max_len=hparams.decoding.max_length, greedy=True)
+
+        else:
+            raw_hypothesis = beam_search(
+                model.translation_model.decoder,
+                model.translation_model.tgt_embed,
+                model.translation_model.generate,
+                vocab_tgt.size(), hidden, encoder_outputs,
+                encoder_final, seq_mask_x, seq_len_x,
+                vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
+                vocab_tgt[PAD_TOKEN], hparams.decoding.beam_width,
+                hparams.decoding.length_penalty_factor,
+                hparams.decoding.max_length,
+                z)
+
+    hypothesis = batch_to_sentences(raw_hypothesis, vocab_src)
+    return hypothesis
+
 
 def _evaluate_bleu(model, val_dl, vocab_src, vocab_tgt, device, hparams):
     model.eval()
@@ -729,10 +773,10 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
 
             # Infer q(z|x) for this batch.
             qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
-            pz = model.prior()  
+            pz = model.prior()
             if isinstance(qz, ProductOfDistributions):
                 total_KL += torch.cat(
-                    [kl_divergence(qi, pi).sum(0).unsqueeze(-1) for qi, pi in zip(qz.distributions, pz.distributions)], 
+                    [kl_divergence(qi, pi).sum(0).unsqueeze(-1) for qi, pi in zip(qz.distributions, pz.distributions)],
                     -1)
             else:
                 total_KL += kl_divergence(qz, pz).sum(0)
@@ -763,9 +807,9 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
 
                 # Compute log P(x|z_s)
                 log_lm_prob = model.language_model.log_prob(lm_likelihood, x_out)
-                
+
                 # Compute prior probability log P(z_s) and importance weight q(z_s|x)
-                log_pz = pz.log_prob(z) 
+                log_pz = pz.log_prob(z)
                 log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
@@ -774,7 +818,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 if log_tm_prob is not None:
                     batch_log_marginals['tm/main'][s] = log_tm_prob + log_pz - log_qz
                     batch_log_marginals['joint/main'][s]+=log_tm_prob
-                
+
                 for aux_comp, aux_px_z in aux_lm_likelihoods.items():
                     batch_log_marginals['lm/' + aux_comp][s] = model.log_likelihood_lm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
                 if aux_tm_likelihoods is not None:

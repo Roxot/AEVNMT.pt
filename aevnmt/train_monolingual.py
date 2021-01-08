@@ -22,7 +22,7 @@ from aevnmt.trainers import AEVNMTTrainer, NMTTrainer,SenVAETrainer
 from aevnmt.components import loss_functions
 
 
-def create_model(hparams, vocab_src, vocab_tgt):
+def create_model(hparams, vocab_src, vocab_tgt=None):
     if hparams.model.type == "cond_nmt":
         model = nmt_helper.create_model(hparams, vocab_src, vocab_tgt)
         loss = nmt_helper.create_loss(hparams)
@@ -40,7 +40,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
         loss = aevnmt_helper.create_loss(hparams)
         trainer = SenVAETrainer(model, loss)
         validate_fn = aevnmt_helper.validate_senvae
-        translate_fn = aevnmt_helper.translate
+        translate_fn = aevnmt_helper.generate_senvae
     else:
         raise Exception(f"Unknown model_type: {hparams.model.type}")
 
@@ -66,8 +66,8 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
                     shuffle=True, num_workers=4)
     bucketing_dl = BucketingTextDataLoader(dl)
 
-    # Save the best model based on development BLEU.
-    ckpt = CheckPoint(model_dir=out_dir / "model", metrics=['bleu', 'likelihood'])
+    # Save the best model based on development perplexity
+    ckpt = CheckPoint(model_dir=out_dir / "model", metrics=['likelihood'])
 
     # Keep track of some stuff in TensorBoard.
     summary_writer = SummaryWriter(log_dir=str(out_dir))
@@ -92,9 +92,9 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
         lr_scheduler_step(lr_schedulers, hparams, val_score=metrics[hparams.criterion])
 
         ckpt.update(
-            epoch_num, step, {f"{hparams.src}-{hparams.tgt}": model},
+            epoch_num, step, {f"{hparams.src}": model},
             # we save with respect to BLEU and likelihood
-            bleu=metrics['bleu'], likelihood=metrics['likelihood']
+            ikelihood=metrics['likelihood']
         )
 
     # Start the training loop.
@@ -226,7 +226,7 @@ def main():
 
     # Create the language model and load it onto the GPU if set to do so.
     #TODO: change create_model
-    model, trainer, validate_fn, _ = create_model(hparams, vocab_src, None)
+    model, trainer, validate_fn, _ = create_model(hparams, vocab_src)
 
     optimizers, lr_schedulers = construct_optimizers(
         hparams,
