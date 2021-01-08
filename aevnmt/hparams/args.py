@@ -45,7 +45,7 @@ io_args = {
     "mono_tgt": (str, None, False, "The target monolingual training data."),
 
     "src": (str, None, True, "The source language"),
-    "tgt": (str, None, True, "The target language"),
+    "tgt": (str, None, False, "The target language"),
     "use_gpu": (bool, False, False, "Whether to use the GPU or not"),
     "data_parallel": (bool, False, False, "Train on multi-gpu with DataParallel."),
     "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
@@ -67,12 +67,12 @@ io_args = {
 model_args = {
     # General model hyperparameters.
     "model.type": (str, "cond_nmt", False, "The type of model to train:"
-                                           " cond_nmt|aevnmt"),
+                                           " cond_nmt|aevnmt|senvae"),
 }
 
 distribution_args = {
     "prior.family": (str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)"),
-    "prior.params": (str, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
+    "prior.params": (str, "0.0 1.0", False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
         "beta (a: default 0.5, b: default 0.5), "
         "mog (num_components: default 10, radius: default 10, scale: default 0.5)"),
     "prior.latent_size": (int, 32, False, "The size of the latent variables."),

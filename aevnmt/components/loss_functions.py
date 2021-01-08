@@ -129,7 +129,9 @@ class ELBOLoss(Loss):
         """
         out_dict = dict()
 
-        tm_log_likelihood = log_likelihood_loss(tm_likelihood, targets_y,
+        tm_log_likelihood=None
+        if tm_likelihood is not None:
+            tm_log_likelihood = log_likelihood_loss(tm_likelihood, targets_y,
                                                 model.translation_model.log_prob,
                                                 model.translation_model.tgt_embedder.padding_idx,
                                                 self.label_smoothing_y)
@@ -148,7 +150,9 @@ class ELBOLoss(Loss):
             KL_weight = min(KL_weight, (KL_weight / self.kl_annealing_steps) * step)
 
         # ELBO and loss
-        elbo = tm_log_likelihood + lm_log_likelihood - KL * KL_weight
+        elbo = lm_log_likelihood - KL * KL_weight
+        if tm_log_likelihood is not None:
+            elbo+=tm_log_likelihood
         loss = - elbo
 
         # MMD(q(z) || p(z))
@@ -179,7 +183,8 @@ class ELBOLoss(Loss):
         out_dict['KL'] = KL.detach()
         out_dict['raw_KL'] = raw_KL.detach()
         out_dict['lm/main'] = lm_log_likelihood.detach()
-        out_dict['tm/main'] = tm_log_likelihood.detach()
+        if tm_log_likelihood is not None:
+            out_dict['tm/main'] = tm_log_likelihood.detach()
 
         return out_dict
 

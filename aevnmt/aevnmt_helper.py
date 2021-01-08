@@ -11,10 +11,10 @@ from torch.utils.data import DataLoader
 
 from probabll.distributions import ProductOfDistributions
 
-from aevnmt.data import BucketingParallelDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
+from aevnmt.data import BucketingParallelDataLoader,BucketingTextDataLoader, PAD_TOKEN, SOS_TOKEN, EOS_TOKEN
 from aevnmt.data import create_batch, batch_to_sentences
 from aevnmt.components import DetachedEmbeddingLayer, RNNEncoder, beam_search, greedy_decode, sampling_decode, Constraint, loss_functions
-from aevnmt.models import AEVNMT
+from aevnmt.models import AEVNMT,SenVAE
 from aevnmt.models.generative import GenerativeLM, IndependentLM, CorrelatedBernoullisLM
 from aevnmt.models.generative import CorrelatedCategoricalsLM, CorrelatedPoissonsLM
 from aevnmt.models.generative import GenerativeTM, IndependentTM, CorrelatedBernoullisTM, CorrelatedCategoricalsTM
@@ -319,6 +319,56 @@ def create_constraints(hparams):
     return constraints
 
 
+def create_senvae_model(hparams, vocab_src):
+    # Generative components
+    src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
+    language_model = create_language_model(vocab_src, src_embedder, hparams)
+
+    # Auxiliary generative components
+    aux_lms = create_aux_language_models(vocab_src, src_embedder, hparams)
+    if aux_lms:
+        raise NotImplementedError("Aux losses are not yet supported with the new loss functions. See Issue #17.")
+
+    priors = []
+    n_priors = len(hparams.prior.family.split(";"))
+    if hparams.prior.latent_sizes:
+        latent_sizes = [int(size) for size in re.split('[ ;:,]+', hparams.prior.latent_sizes.strip())]
+        if len(latent_sizes) != n_priors:
+            raise ValueError("You need to specify a latent_size for each prior using --latent_sizes 'list'")
+        if sum(latent_sizes) != hparams.prior.latent_size:
+            raise ValueError("The sum of latent_sizes must equal latent_size")
+    else:
+        if hparams.prior.latent_size % n_priors != 0:
+            raise ValueError("Use a latent size multiple of the number of priors")
+        latent_sizes = [hparams.prior.latent_size // n_priors] * n_priors
+    for prior_family, prior_params, latent_size in zip(hparams.prior.family.split(";"), hparams.prior.params.split(";"),
+                                                       latent_sizes):
+        prior_params = [float(param) for param in prior_params.split()]
+        priors.append(create_prior(prior_family, latent_size, prior_params))
+
+    inf_model = create_inference_model(
+        DetachedEmbeddingLayer(src_embedder) if hparams.emb.shared else torch.nn.Embedding(
+            src_embedder.num_embeddings, src_embedder.embedding_dim, padding_idx=src_embedder.padding_idx), None,
+        latent_sizes,
+        hparams)
+
+    constraints = create_constraints(hparams)
+
+    model = SenVAE(
+        latent_size=hparams.prior.latent_size,
+        src_embedder=src_embedder,
+        language_model=language_model,
+        inference_model=inf_model,
+        dropout=hparams.dropout,
+        feed_z=None,
+        tied_embeddings=None,
+        prior=priors[0] if len(priors) == 1 else ProductOfPriorsLayer(priors),
+        constraints=constraints,
+        aux_lms=aux_lms,
+        mixture_likelihood=hparams.likelihood.mixture,
+        mixture_likelihood_dir_prior=hparams.likelihood.mixture_dir_prior)
+    return model
+
 def create_model(hparams, vocab_src, vocab_tgt):
     # Generative components
     src_embedder = torch.nn.Embedding(vocab_src.size(), hparams.emb.size, padding_idx=vocab_src[PAD_TOKEN])
@@ -547,6 +597,55 @@ def validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step, title
     return {'bleu': val_bleu, 'likelihood': -val_NLL, 'nll': val_NLL, 'ppl': val_ppl}
 
 
+def validate_senvae(model, val_data, vocab_src, device, hparams, step, title='x', summary_writer=None):
+    if isinstance(model, ParallelWrapper):
+        model = model.module.model
+    model.eval()
+
+    # Create the validation dataloader. We can just bucket.
+    val_dl = DataLoader(val_data, batch_size=hparams.batch_size,
+                        shuffle=False, num_workers=4)
+    val_dl = BucketingTextDataLoader(val_dl)
+
+    val_ppl, val_KL, val_NLLs = _evaluate_perplexity(model, val_dl, vocab_src, None, device)
+    val_NLL = val_NLLs['joint/main']
+
+    # nll_str = ' '.join('-- validation NLL {} = {:.2f}'.format(comp_name, comp_value)  for comp_name, comp_value in sorted(val_NLLs.items()))
+    nll_str = f""
+    # - log P(x|z) for the various source LM decoders
+    for comp_name, comp_nll in sorted(val_NLLs.items()):
+        if comp_name.startswith('lm/'):
+            nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
+    # - log P(y|z,x) for the various translation decoders
+    for comp_name, comp_nll in sorted(val_NLLs.items()):
+        if comp_name.startswith('tm/'):
+            nll_str += f" -- {comp_name} = {comp_nll:,.2f}"
+
+    kl_str = f"-- KL = {val_KL.sum():.2f}"
+    if isinstance(model.prior(), ProductOfDistributions):
+        for i, p in enumerate(model.prior().distributions):
+            kl_str += f" -- KL{i} = {val_KL[i]:.2f}"
+
+    print(f"direction = {title}\n"
+          f"validation perplexity = {val_ppl:,.2f}"
+          f" {kl_str}"
+          f" {nll_str}\n")
+
+
+    # Write validation summaries.
+    if summary_writer is not None:
+        summary_writer.add_scalar(f"{title}/validation/perplexity", val_ppl, step)
+        summary_writer.add_scalar(f"{title}/validation/KL", val_KL.sum(), step)
+        if isinstance(model.prior(), ProductOfDistributions):
+            for i, _ in enumerate(model.prior().distributions):
+                summary_writer.add_scalar(f"{title}/validation/KL{i}", val_KL[i], step)
+        for comp_name, comp_value in val_NLLs.items():
+            summary_writer.add_scalar(f"{title}/validation/NLL/{comp_name}", comp_value, step)
+
+
+    return {'bleu': 0.0, 'likelihood': -val_NLL, 'nll': val_NLL, 'ppl': val_ppl}
+
+
 def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, deterministic=True):
     # TODO: this code should be in the translation model class
     model.eval()
@@ -617,9 +716,16 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
         log_marginal = defaultdict(float)
         total_KL = 0.
         n_samples = 10
-        for sentences_x, sentences_y in val_dl:
+        for tup in val_dl:
+            if vocab_tgt is not None:
+                sentences_x, sentences_y = tup
+            else:
+                sentences_x=tup
             x_in, x_out, seq_mask_x, seq_len_x = create_batch(sentences_x, vocab_src, device)
-            y_in, y_out, seq_mask_y, seq_len_y = create_batch(sentences_y, vocab_tgt, device)
+            if vocab_tgt is not None:
+                y_in, y_out, seq_mask_y, seq_len_y = create_batch(sentences_y, vocab_tgt, device)
+            else:
+                y_in, y_out, seq_mask_y, seq_len_y = None,None,None,None
 
             # Infer q(z|x) for this batch.
             qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x, y_in, seq_mask_y, seq_len_y)
@@ -642,10 +748,18 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 z = qz.sample()
 
                 # Compute the logits according to this sample of z.
-                tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(x_in, seq_mask_x, seq_len_x, y_in, z)
+                if isinstance(model,SenVAE):
+                    tm_likelihood=None
+                    aux_tm_likelihoods=None
+                    lm_likelihood, _, aux_lm_likelihoods  = model(x_in, seq_mask_x, seq_len_x, z)
+                else:
+                    tm_likelihood, lm_likelihood, _, aux_lm_likelihoods, aux_tm_likelihoods = model(x_in, seq_mask_x, seq_len_x, y_in, z)
 
                 # Compute log P(y|x, z_s)
-                log_tm_prob = model.translation_model.log_prob(tm_likelihood, y_out)
+                if tm_likelihood is not None:
+                    log_tm_prob = model.translation_model.log_prob(tm_likelihood, y_out)
+                else:
+                    log_tm_prob =None
 
                 # Compute log P(x|z_s)
                 log_lm_prob = model.language_model.log_prob(lm_likelihood, x_out)
@@ -655,14 +769,17 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_qz = qz.log_prob(z)
 
                 # Estimate the importance weighted estimate of (the log of) P(x, y)
-                batch_log_marginals['joint/main'][s] = log_tm_prob + log_lm_prob + log_pz - log_qz
+                batch_log_marginals['joint/main'][s] =  log_lm_prob + log_pz - log_qz
                 batch_log_marginals['lm/main'][s] = log_lm_prob + log_pz - log_qz
-                batch_log_marginals['tm/main'][s] = log_tm_prob + log_pz - log_qz
+                if log_tm_prob is not None:
+                    batch_log_marginals['tm/main'][s] = log_tm_prob + log_pz - log_qz
+                    batch_log_marginals['joint/main'][s]+=log_tm_prob
                 
                 for aux_comp, aux_px_z in aux_lm_likelihoods.items():
                     batch_log_marginals['lm/' + aux_comp][s] = model.log_likelihood_lm(aux_comp, aux_px_z, x_out) + log_pz - log_qz
-                for aux_comp, aux_py_xz in aux_tm_likelihoods.items():
-                    batch_log_marginals['tm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
+                if aux_tm_likelihoods is not None:
+                    for aux_comp, aux_py_xz in aux_tm_likelihoods.items():
+                        batch_log_marginals['tm/' + aux_comp][s] = model.log_likelihood_tm(aux_comp, aux_py_xz, y_out) + log_pz - log_qz
 
             for comp_name, log_marginals in batch_log_marginals.items():
                 # Average over all samples.
@@ -670,7 +787,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
                 log_marginal[comp_name] = log_marginal[comp_name] + batch_avg.sum().item()
 
             num_sentences += batch_size
-            num_predictions += (seq_len_x.sum() + seq_len_y.sum()).item()
+            num_predictions += (seq_len_x.sum() + (seq_len_y.sum() if vocab_tgt is not None else 0.0)).item()
 
     val_NLL = -log_marginal['joint/main']
     val_perplexity = np.exp(val_NLL / num_predictions)

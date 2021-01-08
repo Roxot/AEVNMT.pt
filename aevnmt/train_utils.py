@@ -12,6 +12,41 @@ from aevnmt.data import Vocabulary, ParallelDataset, TextDataset, remove_subword
 from aevnmt.components import BahdanauAttention, BahdanauDecoder, LuongAttention, LuongDecoder
 from aevnmt.components import RNNEncoder, TransformerEncoder, TransformerDecoder
 
+
+def load_data_monolingual(hparams, vocab_src, use_memmap=False):
+    train_src = f"{hparams.training_prefix}.{hparams.src}"
+    val_src = f"{hparams.validation_prefix}.{hparams.src}"
+    opt_data = dict()
+
+    if use_memmap:
+        print('Memory mapping bilingual data')
+        training_data = MemMappedCorpus(
+            train_src,
+            f"{hparams.output_dir}/training.memmap",
+            vocab_src,
+            max_length=hparams.max_sentence_length
+        )
+        # Generally there's no need for memory mapping validation data
+        print('Loading validation data')
+        val_data =TextDataset(val_src, max_length=-1)
+
+        if hparams.mono_src:
+            print('Memory mapping source monolingual data')
+            opt_data['mono_src'] = MemMappedCorpus(
+                hparams.mono_src,
+                f"{hparams.output_dir}/mono_src.memmap",
+                vocab_src,
+                max_length=hparams.max_sentence_length)
+    else:
+        training_data = TextDataset(train_src, max_length=hparams.max_sentence_length)
+        val_data = TextDataset(val_src, max_length=-1)
+        if hparams.mono_src:
+            opt_data['mono_src'] = TextDataset(hparams.mono_src, max_length=hparams.max_sentence_length)
+        if hparams.mono_tgt:
+            opt_data['mono_tgt'] = TextDataset(hparams.mono_tgt, max_length=hparams.max_sentence_length)
+
+    return training_data, val_data, opt_data
+
 def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
     train_tgt = f"{hparams.training_prefix}.{hparams.tgt}"
@@ -56,6 +91,29 @@ def load_data(hparams, vocab_src, vocab_tgt, use_memmap=False):
             opt_data['mono_tgt'] = TextDataset(hparams.mono_tgt, max_length=hparams.max_sentence_length)
 
     return training_data, val_data, opt_data
+
+
+
+def load_vocabularies_monolingual(hparams):
+    train_src = f"{hparams.training_prefix}.{hparams.src}"
+    val_src = f"{hparams.validation_prefix}.{hparams.src}"
+
+    # Construct the vocabularies.
+    if hparams.vocab.prefix is not None:
+
+        vocab_file = f"{hparams.vocab.prefix}.{hparams.src}"
+        vocab = Vocabulary.from_file(vocab_file, max_size=hparams.vocab.max_size)
+        vocab_src=vocab
+
+
+    else:
+
+        src_files = [train_src, val_src]
+        if hparams.mono_src:
+            src_files.append(hparams.mono_src)
+        vocab_src = Vocabulary.from_data(src_files, min_freq=hparams.vocab.min_freq,
+                                         max_size=hparams.vocab.max_size)
+    return vocab_src
 
 def load_vocabularies(hparams):
     train_src = f"{hparams.training_prefix}.{hparams.src}"
