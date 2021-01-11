@@ -196,7 +196,7 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
 
     # Load the best model and run validation again, make sure to not write
     # summaries.
-    best_model_info = ckpt.load_best({f"{hparams.src}-{hparams.tgt}": model}, hparams.criterion)
+    best_model_info = ckpt.load_best({f"{hparams.src}": model}, hparams.criterion)
     print(
         f"Loaded best model (wrt {hparams.criterion}) found at step {best_model_info['step']} (epoch {best_model_info['epoch']}).")
     model.eval()

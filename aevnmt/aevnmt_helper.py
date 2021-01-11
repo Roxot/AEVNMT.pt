@@ -691,7 +691,6 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
 
-#TODO: change me
 def generate_senvae(model, num_samples, vocab_src, device, hparams, deterministic=True):
 
     model.eval()
@@ -702,34 +701,34 @@ def generate_senvae(model, num_samples, vocab_src, device, hparams, deterministi
         #z = qz.mean if deterministic else qz.sample()
         z = qz.sample()
 
-        if isinstance(model.translation_model, TransformerTM):
-            encoder_outputs, seq_len_x = model.translation_model.encode(x_in, seq_len_x, z)
-            encoder_final = None
+        if isinstance(model.language_model, TransformerLM):
             hidden = None
         else:
-            encoder_outputs, encoder_final = model.translation_model.encode(x_in, seq_len_x, z)
-            hidden = model.translation_model.init_decoder(encoder_outputs, encoder_final, z)
+            hidden = model.language_model.init(z)
 
         if hparams.decoding.sample:
-            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+            raw_hypothesis = model.language_model.sample(z,
                max_len=hparams.decoding.max_length, greedy=False)
 
         elif hparams.decoding.beam_width <= 1:
-            raw_hypothesis = model.translation_model.sample(x_in, seq_mask_x, seq_len_x, z,
+            raw_hypothesis = model.language_model.sample( z,
                max_len=hparams.decoding.max_length, greedy=True)
 
         else:
+            raise NotImplementedError
+            """
             raw_hypothesis = beam_search(
-                model.translation_model.decoder,
-                model.translation_model.tgt_embed,
-                model.translation_model.generate,
-                vocab_tgt.size(), hidden, encoder_outputs,
-                encoder_final, seq_mask_x, seq_len_x,
-                vocab_tgt[SOS_TOKEN], vocab_tgt[EOS_TOKEN],
-                vocab_tgt[PAD_TOKEN], hparams.decoding.beam_width,
+                model.language_model,
+                model.language_model.embedder,
+                model.language_model.generate,
+                vocab_src.size(), None, None,
+                None, None, None,
+                vocab_src[SOS_TOKEN], vocab_src[EOS_TOKEN],
+                vocab_src[PAD_TOKEN], hparams.decoding.beam_width,
                 hparams.decoding.length_penalty_factor,
                 hparams.decoding.max_length,
                 z)
+            """
 
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_src)
     return hypothesis
