@@ -73,7 +73,7 @@ python -u -m aevnmt.generate  \
     --output_dir OUTPUT-DIRECTORY \
     --verbose true \
     --translation_output_file SAMPLED_TEXT \
-    --decoding.sample true --decoding.num_prior_samples 100
+    --decoding.sample true --translation.num_prior_samples 100
     
 ```
 
