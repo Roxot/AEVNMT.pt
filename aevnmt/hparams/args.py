@@ -132,7 +132,7 @@ lm_args = {
     "gen.lm.rnn.cell_type": (str, "lstm", False, "The lm rnn cell type. rnn|gru|lstm"),
     "gen.lm.tied_embeddings": (bool, False, False, "Tie the lm embedding matrix with the output projection"),
     "gen.lm.feed_z": (bool, False, False, "Concatenate z to the previous lm embeddings at each timestep"),
-    "gen.lm.style": (str, "rnn", False, "LM style: rnn|transformer"),    
+    "gen.lm.style": (str, "rnn", False, "LM style: rnn|transformer"),
 }
 
 aux_args = {
@@ -249,6 +249,7 @@ translation_args = {
     "translation.output_file": (str, None, False, "The translation output file,"
                                                 " ignored for training."),
     "translation.ref_file": (str, None, False, "The translation references file"),
+    "translation.num_prior_samples": (int, None, False, "Sample this many sentences from the prior when generating from a Sentence VAe"),
     "verbose": (bool, False, False, "Print logging information"),
     "show_raw_output": (bool, False, False, "Prints raw output (tokenized, truecased, BPE-segmented, max-len splitting) to stderr"),
     "translation.interactive": (int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout"),

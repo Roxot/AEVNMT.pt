@@ -691,11 +691,17 @@ def translate(model, input_sentences, vocab_src, vocab_tgt, device, hparams, det
     hypothesis = batch_to_sentences(raw_hypothesis, vocab_tgt)
     return hypothesis
 
-def generate_senvae(model, num_samples, vocab_src, device, hparams, deterministic=True):
+def generate_senvae(model, input_sentences , num_samples, vocab_src, device, hparams, deterministic=True):
 
     model.eval()
     with torch.no_grad():
-        qz=model.prior().expand((num_samples,))
+
+        if input_sentences is not None:
+            x_in, _, seq_mask_x, seq_len_x = create_batch(input_sentences, vocab_src, device)
+            qz = model.approximate_posterior(x_in, seq_mask_x, seq_len_x,
+                    y=x_in, seq_mask_y=seq_mask_x, seq_len_y=seq_len_x)
+        else:
+            qz=model.prior().expand((num_samples,))
 
         # TODO: restore some form of deterministic decoding
         #z = qz.mean if deterministic else qz.sample()

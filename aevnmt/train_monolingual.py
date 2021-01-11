@@ -94,7 +94,7 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
         ckpt.update(
             epoch_num, step, {f"{hparams.src}": model},
             # we save with respect to BLEU and likelihood
-            ikelihood=metrics['likelihood']
+            likelihood=metrics['likelihood']
         )
 
     # Start the training loop.

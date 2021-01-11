@@ -105,42 +105,87 @@ class GenerationEngine:
         if self.verbose:
             print("Done loading in %.2f seconds" % (time.time() - t0), file=sys.stderr)
 
-    def generate(self, num_samples: int, stdout=sys.stdout):
+    def generate(self,lines , num_samples: int, stdout=sys.stdout):
         hparams = self.hparams
         batch_size=hparams.batch_size
 
         # Translate the data.
         num_translated = 0
         all_hypotheses = []
-        if self.verbose:
-            print(f"Sampling {num_samples} sentences...", file=sys.stderr)
 
-        num_batches=num_samples//batch_size
-        if num_samples % batch_size > 0:
-            num_batches+=1
+        if lines is not None:
+            #Use inference network to obtain latent codes from input sentences
+            if hparams.split_sentences:  # This is a type of pre-processing we do not a post-processing counterpart for
+                if hparams.verbose:
+                    print(f"Running sentence splitter for {len(lines)} lines")
+                lines = SentenceSplitter(hparams.src).split(lines)
+                if hparams.verbose:
+                    print(f"Produced {len(lines)} sentences")
+            input_data = InputTextDataset(
+                generator=(self.pipeline.pre(line) for line in lines),
+                max_length=hparams.max_sentence_length,
+                split=True)
+            input_dl = DataLoader(
+                input_data, batch_size=hparams.batch_size,
+                shuffle=False, num_workers=4)
+            input_size = len(input_data)
 
-        for batch_idx in range(num_batches):
-            local_batch_size=batch_size
-            if batch_idx == num_batches -1 and num_samples % batch_size > 0:
-                local_batch_size=num_samples % batch_size
+            for input_sentences in input_dl:
 
-            t1 = time.time()
-            # Translate the sentences using the trained model.
-            hypotheses = self.translate_fn(
-                self.model, local_batch_size,
-                self.vocab_src,
-                self.device, hparams)
+                # Sort the input sentences from long to short.
+                input_sentences = np.array(input_sentences)
+                seq_len = np.array([len(s.split()) for s in input_sentences])
+                sort_keys = np.argsort(-seq_len)
+                input_sentences = input_sentences[sort_keys]
 
-            num_translated += local_batch_size
+                t1 = time.time()
+                # Translate the sentences using the trained model.
+                hypotheses = self.translate_fn(
+                    self.model, input_sentences,None,
+                    self.vocab_src,
+                    self.device, hparams)
 
-            # Restore the original ordering.
-            all_hypotheses += hypotheses.tolist()
+                num_translated += len(input_sentences)
 
+                # Restore the original ordering.
+                inverse_sort_keys = np.argsort(sort_keys)
+                all_hypotheses += hypotheses[inverse_sort_keys].tolist()
+
+                if self.verbose:
+                    print(f"{num_translated}/{input_size} sentences translated in {time.time() - t1:.2f} seconds.", file=sys.stderr)
+
+        else:
+            input_size=num_samples
+            #Sample from the prior to obtain latent codes
             if self.verbose:
-                print(f"{num_translated}/{input_size} sentences translated in {time.time() - t1:.2f} seconds.", file=sys.stderr)
+                print(f"Sampling {num_samples} sentences...", file=sys.stderr)
+
+            num_batches=num_samples//batch_size
+            if num_samples % batch_size > 0:
+                num_batches+=1
+
+            for batch_idx in range(num_batches):
+                local_batch_size=batch_size
+                if batch_idx == num_batches -1 and num_samples % batch_size > 0:
+                    local_batch_size=num_samples % batch_size
+
+                t1 = time.time()
+                # Translate the sentences using the trained model.
+                hypotheses = self.translate_fn(
+                    self.model, None,local_batch_size,
+                    self.vocab_src,
+                    self.device, hparams)
+
+                num_translated += local_batch_size
+
+                # Restore the original ordering.
+                all_hypotheses += hypotheses.tolist()
+
+                if self.verbose:
+                    print(f"{num_translated}/{num_samples} sentences translated in {time.time() - t1:.2f} seconds.", file=sys.stderr)
 
         if hparams.show_raw_output:
-            for i in range(num_samples):
+            for i in range(input_size):
                 print(i + self.n_translated, '|||' '|||', all_hypotheses[i], file=sys.stderr)
 
         # Post-processing
@@ -150,16 +195,19 @@ class GenerationEngine:
             for hypothesis in all_hypotheses:
                 print(hypothesis, file=stdout)
 
-        self.n_translated += num_samples
+        self.n_translated += input_size
 
         return all_hypotheses
 
-    def generate_file(self, output_path=None, num_samples=100, stdout=None):
+    def generate_file(self, input_path=None, output_path=None, num_samples=100, stdout=None):
         if output_path is None:
             stdout = sys.stdout
 
-        #TODO: add option to read latent code from file
-        translations = self.generate(num_samples, stdout=stdout)
+        if input_path is not None:
+            with open(input_path) as f:
+                translations = self.generate(lines=f.readlines(), num_samples=num_samples, stdout=stdout)
+        else:
+            translations = self.generate(lines=None,num_samples=num_samples, stdout=stdout)
 
         # If an output file is given write the output to that file.
         if output_path is not None:
@@ -201,7 +249,12 @@ def main(hparams=None):
     #        output_path=hparams.translation.output_file,
     #        reference_path=hparams.translation.ref_file
     #    )
-    engine.generate_file(output_path=hparams.translation.output_file)
+
+    if hparams.translation.input_file is not None and  hparams.translation.num_prior_samples is not None:
+        raise ValueError("If you specify an input file, you cannot sample from the prior")
+    if hparams.translation.input_file is  None and  hparams.translation.num_prior_samples is  None:
+        raise ValueError("You must specify either an input file or a number of prior samples")
+    engine.generate_file(input_path=hparams.translation.input_file,output_path=hparams.translation.output_file,num_samples=hparams.translation.num_prior_samples)
 
 if __name__ == "__main__":
     main()
