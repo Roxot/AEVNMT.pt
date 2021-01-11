@@ -218,7 +218,7 @@ decoding_args = {
 }
 
 loss_args = {
-    "loss.type": (str, "ELBO", False, "Type of training objective. likelihood|ELBO|InfoVAE|LagVAE|IWVAE"),
+    "loss.type": (str, "ELBO", False, "Type of training objective. likelihood|ELBO|InfoVAE|LagVAE|IWAE"),
 
     "loss.ELBO.beta": (float, 1., False, "Weight of the ELBO KL term."),
     "loss.ELBO.free_nats": (float, 0., False, "KL = min(free_nats, KL)"),
