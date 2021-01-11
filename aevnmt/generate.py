@@ -6,7 +6,7 @@ import time
 from aevnmt.hparams import Hyperparameters
 from aevnmt.data import TextDataset, RawInputTextDataset, remove_subword_tokens, postprocess
 from aevnmt.train_monolingual import create_model
-from aevnmt.train_utils import load_vocabularies, compute_bleu
+from aevnmt.train_utils import load_vocabularies, load_vocabularies_monolingual , compute_bleu
 from aevnmt.data.datasets import InputTextDataset
 from aevnmt.data.textprocessing import SentenceSplitter
 from aevnmt.data.textprocessing import Pipeline
@@ -105,7 +105,7 @@ class GenerationEngine:
         if self.verbose:
             print("Done loading in %.2f seconds" % (time.time() - t0), file=sys.stderr)
 
-    def translate(self, num_samples: int, stdout=sys.stdout):
+    def generate(self, num_samples: int, stdout=sys.stdout):
         hparams = self.hparams
         batch_size=hparams.batch_size
 

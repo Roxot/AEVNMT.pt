@@ -50,7 +50,7 @@ io_args = {
     "data_parallel": (bool, False, False, "Train on multi-gpu with DataParallel."),
     "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
     "output_dir": (str, None, True, "Output directory."),
-    "subword_token": (str, None, False, "The subword token, e.g. \"@@\"."),
+    "subword_token": (str, "@@", False, "The subword token, e.g. \"@@\"."),
     "max_sentence_length": (int, -1, False, "The maximum sentence length during"
                                             " training."),
     "vocab.prefix": (str, None, False, "The vocabulary prefix, if share_vocab is True"
