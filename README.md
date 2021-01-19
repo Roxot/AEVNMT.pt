@@ -33,7 +33,7 @@ pip install -r requirements.txt
 
 For developers, we recommend
 ```bash
-python install --editable .
+pip install --editable .
 ```
 
 For other users, we recommend 
