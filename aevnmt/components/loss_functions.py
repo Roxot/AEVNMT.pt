@@ -42,7 +42,7 @@ def label_smoothing_loss(likelihood: Categorical, target, ignore_index=None):
 
 def mmd_loss(sample_1, sample_2):
     """Computes an unbiased estimate of the MMD between two distributions given a set of samples from both.
-    
+
     Source: https://github.com/tom-pelsmaeker/deep-generative-lm/blob/master/model/base_decoder.py
     """
     mmd = MMDStatistic(max(2, sample_1.shape[0]), max(2, sample_2.shape[0]))
@@ -129,7 +129,9 @@ class ELBOLoss(Loss):
         """
         out_dict = dict()
 
-        tm_log_likelihood = log_likelihood_loss(tm_likelihood, targets_y,
+        tm_log_likelihood=None
+        if tm_likelihood is not None:
+            tm_log_likelihood = log_likelihood_loss(tm_likelihood, targets_y,
                                                 model.translation_model.log_prob,
                                                 model.translation_model.tgt_embedder.padding_idx,
                                                 self.label_smoothing_y)
@@ -148,7 +150,9 @@ class ELBOLoss(Loss):
             KL_weight = min(KL_weight, (KL_weight / self.kl_annealing_steps) * step)
 
         # ELBO and loss
-        elbo = tm_log_likelihood + lm_log_likelihood - KL * KL_weight
+        elbo = lm_log_likelihood - KL * KL_weight
+        if tm_log_likelihood is not None:
+            elbo+=tm_log_likelihood
         loss = - elbo
 
         # MMD(q(z) || p(z))
@@ -175,11 +179,12 @@ class ELBOLoss(Loss):
             out_dict['loss'] = loss
         else:
             raise Exception(f"Unknown reduction option {reduction}")
-        
+
         out_dict['KL'] = KL.detach()
         out_dict['raw_KL'] = raw_KL.detach()
         out_dict['lm/main'] = lm_log_likelihood.detach()
-        out_dict['tm/main'] = tm_log_likelihood.detach()
+        if tm_log_likelihood is not None:
+            out_dict['tm/main'] = tm_log_likelihood.detach()
 
         return out_dict
 
@@ -219,7 +224,9 @@ class LagVAELoss(Loss):
     def forward(self, tm_likelihood, lm_likelihood, targets_y, targets_x, qz, pz, sample_qz, step, model, reduction='mean'):
         out_dict = dict()
 
-        ll_py = log_likelihood_loss(tm_likelihood, targets_y,
+        ll_py=None
+        if tm_likelihood is not None:
+            ll_py = log_likelihood_loss(tm_likelihood, targets_y,
                                     model.translation_model.log_prob,
                                     model.translation_model.tgt_embedder.padding_idx,
                                     self.label_smoothing_y)
@@ -227,7 +234,9 @@ class LagVAELoss(Loss):
                                     model.language_model.log_prob,
                                     model.language_model.pad_idx,
                                     self.label_smoothing_x)
-        ll_total = ll_py + ll_px
+        ll_total = ll_px
+        if ll_py is not None:
+            ll_total+=ll_py
         KL = torch.distributions.kl_divergence(qz, pz)
         neg_elbo = KL - ll_total
         mmd = mmd_loss(sample_qz, pz.sample([sample_qz.size(0)]))
@@ -246,9 +255,10 @@ class LagVAELoss(Loss):
             out_dict['loss'] = loss
         else:
             raise Exception(f"Unknown reduction option {reduction}")
-        
+
         out_dict['raw_KL'] = KL.detach()
-        out_dict['tm/main'] = ll_py.detach()
+        if ll_py is not None:
+            out_dict['tm/main'] = ll_py.detach()
         out_dict['lm/main'] = ll_px.detach()
         out_dict['mmd'] = mmd.detach()
 
@@ -279,11 +289,13 @@ class IWAELoss(Loss):
         batch_size = sample_qz.shape[0] // self.num_samples
 
         # log probabilities [num_samples, batch_size]
-        ll_py = log_likelihood_loss(tm_likelihood, targets_y,
+        ll_py=None
+        if tm_likelihood is not None:
+            ll_py = log_likelihood_loss(tm_likelihood, targets_y,
                                     model.translation_model.log_prob,
                                     model.translation_model.tgt_embedder.padding_idx,
                                     self.label_smoothing_y)
-        ll_py = ll_py.view(self.num_samples, batch_size)
+            ll_py = ll_py.view(self.num_samples, batch_size)
         ll_px = log_likelihood_loss(lm_likelihood, targets_x,
                                     model.language_model.log_prob,
                                     model.language_model.pad_idx,
@@ -295,7 +307,9 @@ class IWAELoss(Loss):
         logprob_pz = pz.log_prob(sample_qz)
 
         # Importance weights
-        log_w = ll_px + ll_py + logprob_pz - logprob_qz
+        log_w = ll_px + logprob_pz - logprob_qz
+        if ll_py is not None:
+            log_w += ll_py
         raw_loss = torch.logsumexp(log_w, dim=0) - math.log(self.num_samples)
 
         # Loss with normalized importance weights (See Burda et al. (14))
@@ -314,7 +328,8 @@ class IWAELoss(Loss):
         with torch.no_grad():
             out_dict['raw_KL'] = torch.distributions.kl_divergence(qz, pz)
             out_dict['IWAE_loss'] = raw_loss.detach()
-            out_dict['tm/main'] = torch.logsumexp(ll_py + logprob_pz - logprob_qz, dim=0)
+            if ll_py is not None:
+                out_dict['tm/main'] = torch.logsumexp(ll_py + logprob_pz - logprob_qz, dim=0)
             out_dict['lm/main'] = torch.logsumexp(ll_px + logprob_pz - logprob_qz, dim=0)
 
         return out_dict

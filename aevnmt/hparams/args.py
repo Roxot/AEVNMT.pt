@@ -45,12 +45,12 @@ io_args = {
     "mono_tgt": (str, None, False, "The target monolingual training data."),
 
     "src": (str, None, True, "The source language"),
-    "tgt": (str, None, True, "The target language"),
+    "tgt": (str, None, False, "The target language"),
     "use_gpu": (bool, False, False, "Whether to use the GPU or not"),
     "data_parallel": (bool, False, False, "Train on multi-gpu with DataParallel."),
     "use_memmap": (bool, False, False, "Whether or not to memory-map the data (use it for large corpora)"),
     "output_dir": (str, None, True, "Output directory."),
-    "subword_token": (str, None, False, "The subword token, e.g. \"@@\"."),
+    "subword_token": (str, "@@", False, "The subword token, e.g. \"@@\"."),
     "max_sentence_length": (int, -1, False, "The maximum sentence length during"
                                             " training."),
     "vocab.prefix": (str, None, False, "The vocabulary prefix, if share_vocab is True"
@@ -67,12 +67,12 @@ io_args = {
 model_args = {
     # General model hyperparameters.
     "model.type": (str, "cond_nmt", False, "The type of model to train:"
-                                           " cond_nmt|aevnmt"),
+                                           " cond_nmt|aevnmt|senvae"),
 }
 
 distribution_args = {
     "prior.family": (str, "gaussian", False, "Choose the prior family (gaussian: default, beta, mog)"),
-    "prior.params": (str, [], False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
+    "prior.params": (str, "0.0 1.0", False, "Prior parameters: gaussian (loc: default 0.0, scale: default 1.0), "
         "beta (a: default 0.5, b: default 0.5), "
         "mog (num_components: default 10, radius: default 10, scale: default 0.5)"),
     "prior.latent_size": (int, 32, False, "The size of the latent variables."),
@@ -132,7 +132,7 @@ lm_args = {
     "gen.lm.rnn.cell_type": (str, "lstm", False, "The lm rnn cell type. rnn|gru|lstm"),
     "gen.lm.tied_embeddings": (bool, False, False, "Tie the lm embedding matrix with the output projection"),
     "gen.lm.feed_z": (bool, False, False, "Concatenate z to the previous lm embeddings at each timestep"),
-    "gen.lm.style": (str, "rnn", False, "LM style: rnn|transformer"),    
+    "gen.lm.style": (str, "rnn", False, "LM style: rnn|transformer"),
 }
 
 aux_args = {
@@ -218,7 +218,7 @@ decoding_args = {
 }
 
 loss_args = {
-    "loss.type": (str, "ELBO", False, "Type of training objective. likelihood|ELBO|InfoVAE|LagVAE|IWVAE"),
+    "loss.type": (str, "ELBO", False, "Type of training objective. likelihood|ELBO|InfoVAE|LagVAE|IWAE"),
 
     "loss.ELBO.beta": (float, 1., False, "Weight of the ELBO KL term."),
     "loss.ELBO.free_nats": (float, 0., False, "KL = min(free_nats, KL)"),
@@ -249,6 +249,7 @@ translation_args = {
     "translation.output_file": (str, None, False, "The translation output file,"
                                                 " ignored for training."),
     "translation.ref_file": (str, None, False, "The translation references file"),
+    "translation.num_prior_samples": (int, None, False, "Sample this many sentences from the prior when generating from a Sentence VAe"),
     "verbose": (bool, False, False, "Print logging information"),
     "show_raw_output": (bool, False, False, "Prints raw output (tokenized, truecased, BPE-segmented, max-len splitting) to stderr"),
     "translation.interactive": (int, 0, False, "If n more than 0, reads n sentences from stdin and translates them to stdout"),

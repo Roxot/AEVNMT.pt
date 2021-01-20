@@ -43,6 +43,7 @@ pip install .
 
 # Command line interface
 
+
 ```bash
 python -u -m aevnmt.train \
     --hparams_file HYPERPARAMETERS.json \ 
@@ -58,7 +59,25 @@ python -u -m aevnmt.translate \
     --translation_output_file TRANSLATION \
     --translation_ref_file REFERENCE
 ```
- 
+
+There is also a sentence VAE mode:
+```bash
+python -u -m aevnmt.train_monolingual \
+    --hparams_file HYPERPARAMETERS.json \ 
+    --training_prefix BILINGUAL-DATA \
+    --validation_prefix VALIDATION-DATA \ 
+    --src SRC  \
+    --output_dir OUTPUT-DIRECTORY
+
+python -u -m aevnmt.generate  \
+    --output_dir OUTPUT-DIRECTORY \
+    --verbose true \
+    --translation_output_file SAMPLED_TEXT \
+    --decoding.sample true --translation.num_prior_samples 100
+    
+```
+
+
 # Demos
 See some example <a href="demo/">training and translation scripts</a>, and a <a href="demo/AEVNMT.ipynb">demo notebook</a>.
 

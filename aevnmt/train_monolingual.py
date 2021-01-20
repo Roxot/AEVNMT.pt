@@ -9,20 +9,20 @@ from torch.utils.data import DataLoader
 from pathlib import Path
 from tensorboardX import SummaryWriter
 
-from aevnmt.train_utils import load_data, load_vocabularies, gradient_norm, log_gradient_histograms
+from aevnmt.train_utils import load_data_monolingual, load_vocabularies_monolingual, gradient_norm, log_gradient_histograms
 from aevnmt.train_utils import CheckPoint, model_parameter_count
 from aevnmt.hparams import Hyperparameters
-from aevnmt.data import BucketingParallelDataLoader
+from aevnmt.data import BucketingTextDataLoader
 from aevnmt.data import PAD_TOKEN
 from aevnmt.data.utils import create_noisy_batch
 from aevnmt.models import initialize_model
 from aevnmt.models.parallel import ParallelWrapper, ParallelAEVNMT, aevnmt_train_parallel
 from aevnmt.opt_utils import construct_optimizers, lr_scheduler_step
-from aevnmt.trainers import AEVNMTTrainer, NMTTrainer
+from aevnmt.trainers import AEVNMTTrainer, NMTTrainer,SenVAETrainer
 from aevnmt.components import loss_functions
 
 
-def create_model(hparams, vocab_src, vocab_tgt):
+def create_model(hparams, vocab_src, vocab_tgt=None):
     if hparams.model.type == "cond_nmt":
         model = nmt_helper.create_model(hparams, vocab_src, vocab_tgt)
         loss = nmt_helper.create_loss(hparams)
@@ -36,11 +36,11 @@ def create_model(hparams, vocab_src, vocab_tgt):
         validate_fn = aevnmt_helper.validate
         translate_fn = aevnmt_helper.translate
     elif hparams.model.type == "senvae":
-        model = aevnmt_helper.create_model(hparams, vocab_src, vocab_tgt)
+        model = aevnmt_helper.create_senvae_model(hparams, vocab_src)
         loss = aevnmt_helper.create_loss(hparams)
-        trainer = AEVNMTTrainer(model, loss)
-        validate_fn = aevnmt_helper.validate
-        translate_fn = aevnmt_helper.translate
+        trainer = SenVAETrainer(model, loss)
+        validate_fn = aevnmt_helper.validate_senvae
+        translate_fn = aevnmt_helper.generate_senvae
     else:
         raise Exception(f"Unknown model_type: {hparams.model.type}")
 
@@ -48,7 +48,7 @@ def create_model(hparams, vocab_src, vocab_tgt):
 
 
 def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src,
-          vocab_tgt, device, out_dir, validate, hparams):
+           device, out_dir, validate, hparams):
     """
     :param validate: function that performs validation and returns validation
                      BLEU, used for model selection. Takes as inputs: model,
@@ -64,10 +64,10 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
     # Create a dataloader that buckets the batches.
     dl = DataLoader(training_data, batch_size=hparams.batch_size,
                     shuffle=True, num_workers=4)
-    bucketing_dl = BucketingParallelDataLoader(dl)
+    bucketing_dl = BucketingTextDataLoader(dl)
 
-    # Save the best model based on development BLEU.
-    ckpt = CheckPoint(model_dir=out_dir/"model", metrics=['bleu', 'likelihood'])
+    # Save the best model based on development perplexity
+    ckpt = CheckPoint(model_dir=out_dir / "model", metrics=['likelihood'])
 
     # Keep track of some stuff in TensorBoard.
     summary_writer = SummaryWriter(log_dir=str(out_dir))
@@ -85,36 +85,33 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
         # Perform model validation, keep track of validation BLEU for model
         # selection.
         model.eval()
-        metrics = validate(model, val_data, vocab_src, vocab_tgt, device,
-                            hparams, step, summary_writer=summary_writer)
+        metrics = validate(model, val_data, vocab_src, device,
+                           hparams, step, summary_writer=summary_writer)
 
         # Update the learning rate scheduler.
         lr_scheduler_step(lr_schedulers, hparams, val_score=metrics[hparams.criterion])
 
         ckpt.update(
-            epoch_num, step, {f"{hparams.src}-{hparams.tgt}": model},
+            epoch_num, step, {f"{hparams.src}": model},
             # we save with respect to BLEU and likelihood
-            bleu=metrics['bleu'], likelihood=metrics['likelihood']
+            likelihood=metrics['likelihood']
         )
 
     # Start the training loop.
     while (epoch_num <= hparams.num_epochs) or (ckpt.no_improvement(hparams.criterion) < hparams.patience):
 
         # Train for 1 epoch.
-        for sentences_x, sentences_y in bucketing_dl:
+        for sentences_x in bucketing_dl:
             model.train()
 
             # Perform a forward pass through the model
             x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in = create_noisy_batch(
                 sentences_x, vocab_src, device,
                 word_dropout=hparams.word_dropout)
-            y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in = create_noisy_batch(
-                sentences_y, vocab_tgt, device,
-                word_dropout=hparams.word_dropout)
+
             return_dict = trainer.step(
-                    x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
-                    y_in, y_out, seq_mask_y, seq_len_y, noisy_y_in,
-                    step, summary_writer=summary_writer)
+                x_in, x_out, seq_mask_x, seq_len_x, noisy_x_in,
+                step, summary_writer=summary_writer)
             loss = return_dict["loss"]
 
             # Backpropagate and update gradients.
@@ -125,12 +122,12 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
                                          hparams.max_gradient_norm)
             if (step + 1) % hparams.update_freq == 0:
                 optimizers["gen"].step()
-                if "inf_z" in optimizers: 
+                if "inf_z" in optimizers:
                     optimizers["inf_z"].step()
                 if "lagrangian" in optimizers:
                     optimizers["lagrangian"].step()
             # Update statistics.
-            num_tokens += (seq_len_x.sum() + seq_len_y.sum()).item()
+            num_tokens += seq_len_x.sum().item()
             num_sentences += x_in.size(0)
             total_train_loss += loss.item() * x_in.size(0)
 
@@ -155,17 +152,16 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
                 if 'c' in return_dict:
                     displaying += f"c = {return_dict['c'].mean().item():,.2f}"
                 print(f"({epoch_num}) step {step}: "
-                       f"training loss = {total_train_loss/num_sentences:,.2f} -- "
-                       f"{displaying} -- "
-                       f"{tokens_per_sec:,.0f} tokens/s -- "
-                       f"gradient norm = {grad_norm:.2f}")
-                       
+                      f"training loss = {total_train_loss / num_sentences:,.2f} -- "
+                      f"{displaying} -- "
+                      f"{tokens_per_sec:,.0f} tokens/s -- "
+                      f"gradient norm = {grad_norm:.2f}")
+
                 summary_writer.add_scalar("train/loss",
-                                          total_train_loss/num_sentences, step)
+                                          total_train_loss / num_sentences, step)
                 for k, v in return_dict.items():
                     if "constraint" in k:
                         summary_writer.add_scalar("train/{}", v.mean(), step)
-                    
 
                 num_tokens = 0
                 tokens_start = time.time()
@@ -200,22 +196,22 @@ def train(trainer, optimizers, lr_schedulers, training_data, val_data, vocab_src
 
     # Load the best model and run validation again, make sure to not write
     # summaries.
-    best_model_info = ckpt.load_best({f"{hparams.src}-{hparams.tgt}": model}, hparams.criterion)
-    print(f"Loaded best model (wrt {hparams.criterion}) found at step {best_model_info['step']} (epoch {best_model_info['epoch']}).")
+    best_model_info = ckpt.load_best({f"{hparams.src}": model}, hparams.criterion)
+    print(
+        f"Loaded best model (wrt {hparams.criterion}) found at step {best_model_info['step']} (epoch {best_model_info['epoch']}).")
     model.eval()
-    validate(model, val_data, vocab_src, vocab_tgt, device, hparams, step,
+    validate(model, val_data, vocab_src, device, hparams, step,
              summary_writer=None)
 
 
 def main():
-
     # Load and print hyperparameters.
     hparams = Hyperparameters()
     print("\n==== Hyperparameters")
     hparams.print_values()
 
     # Load the data and print some statistics.
-    vocab_src, vocab_tgt = load_vocabularies(hparams)
+    vocab_src = load_vocabularies_monolingual(hparams)
     if hparams.vocab.shared:
         print("\n==== Vocabulary")
         vocab_src.print_statistics()
@@ -223,14 +219,14 @@ def main():
         print("\n==== Source vocabulary")
         vocab_src.print_statistics()
         print("\n==== Target vocabulary")
-        vocab_tgt.print_statistics()
-    train_data, val_data, _ = load_data(hparams, vocab_src=vocab_src, vocab_tgt=vocab_tgt)
+    train_data, val_data, _ = load_data_monolingual(hparams, vocab_src=vocab_src)
     print("\n==== Data")
     print(f"Training data: {len(train_data):,} bilingual sentence pairs")
     print(f"Validation data: {len(val_data):,} bilingual sentence pairs")
 
     # Create the language model and load it onto the GPU if set to do so.
-    model, trainer, validate_fn, _ = create_model(hparams, vocab_src, vocab_tgt)
+    #TODO: change create_model
+    model, trainer, validate_fn, _ = create_model(hparams, vocab_src)
 
     optimizers, lr_schedulers = construct_optimizers(
         hparams,
@@ -254,7 +250,7 @@ def main():
     # Initialize the model parameters, or load a checkpoint.
     if hparams.model.checkpoint is None:
         print("\nInitializing parameters...")
-        initialize_model(model, vocab_tgt[PAD_TOKEN], hparams.inf.rnn.cell_type,
+        initialize_model(model, vocab_src[PAD_TOKEN], hparams.inf.rnn.cell_type,
                          hparams.emb.init_scale, verbose=True)
     else:
         print(f"\nRestoring model parameters from {hparams.model.checkpoint}...")
@@ -266,7 +262,6 @@ def main():
 
     if hparams.vocab.prefix is None:
         vocab_src.save(out_dir / f"vocab.{hparams.src}")
-        vocab_tgt.save(out_dir / f"vocab.{hparams.tgt}")
         hparams.vocab.prefix = str(out_dir / "vocab")
     hparams.save(out_dir / "hparams")
     print("\n==== Output")
@@ -276,7 +271,8 @@ def main():
     print("\n==== Starting training")
     print(f"Using device: {device}\n")
     train(trainer, optimizers, lr_schedulers, train_data, val_data, vocab_src,
-          vocab_tgt, device, out_dir, validate_fn, hparams)
+           device, out_dir, validate_fn, hparams)
+
 
 if __name__ == "__main__":
     main()
