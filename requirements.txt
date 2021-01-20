@@ -8,3 +8,5 @@ sacrebleu
 sacremoses
 mosestokenizer
 jsonargparse
+packaging
+git+git://github.com/josipd/torch-two-sample@master#egg=torch_two_sample
