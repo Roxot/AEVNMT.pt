@@ -30,7 +30,7 @@ class RNNEncoder(nn.Module):
         self.rnn.flatten_parameters()
 
         # Run the RNN over the entire sentence.
-        packed_seq = pack_padded_sequence(x_embed, seq_len, batch_first=True, enforce_sorted=False)
+        packed_seq = pack_padded_sequence(x_embed, seq_len.to('cpu'), batch_first=True, enforce_sorted=False)
         output, final = self.rnn(packed_seq, hidden)
         output, _ = pad_packed_sequence(output, batch_first=True, total_length=x_embed.size(1))
 
