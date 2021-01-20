@@ -157,8 +157,8 @@ class ELBOLoss(Loss):
             mmd = mmd_loss(sample_qz, sample_pz)
             out_dict['MMD'] = mmd
             # NOTE the loss is the negative ELBO,
-            # -(ELBO + MMD) == - ELBO - MMD
-            loss = loss - mmd * self.mmd_weight
+            # -(ELBO - MMD) == - ELBO + MMD
+            loss = loss + mmd * self.mmd_weight
 
         # Constraints
         if 'MDR' in model.constraints:
