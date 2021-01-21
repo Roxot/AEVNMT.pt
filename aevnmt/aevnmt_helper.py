@@ -303,8 +303,8 @@ def create_constraints(hparams):
             constraints['MDR'] = Constraint(hparams.loss.ELBO.mdr, 'ge', name='MDR')
 
     elif hparams.loss.type == "InfoVAE":
-        # Add optional InfoVAE constraints here.
-        pass
+        if hparams.loss.InfoVAE.mdr > 0:
+            constraints['MDR'] = Constraint(hparams.loss.InfoVAE.mdr, 'ge', name='MDR')
 
     elif hparams.loss.type == "LagVAE":
         constraints['ELBO'] = Constraint(hparams.loss.LagVAE.max_elbo, 'le', name='ELBO')

@@ -167,7 +167,7 @@ opt_args = {
     "evaluate_every": (int, -1, False, "The number of batches after which to run"
                                        " evaluation. If <= 0, evaluation will happen"
                                        " after every epoch."),
-    "criterion": (str, "bleu", False, "Criterion for convergence checks ('bleu' or 'likelihood')"),
+    "criterion": (str, "likelihood", False, "Criterion for convergence checks ('bleu' or 'likelihood')"),
     # Inf
     "inf.opt.lr_warmup": (int, 4000, False, "Inf learning rate warmup (noam_scheduler)"),
     "inf.opt.lr_min": (float, 1e-5, False, "The minimum  inf learning rate the learning rate"
@@ -227,6 +227,7 @@ loss_args = {
 
     "loss.InfoVAE.alpha": (float, 0., False, "Relative weight of the KL and MMD terms."),
     "loss.InfoVAE.lamb": (float, 0., False, "Scaling of the InfoVAE MMD term."),
+    "loss.InfoVAE.mdr": (float, 0., False, "Adds a minimum desired rate by putting a lagrangian constraint for the KL on the ELBO."),
 
     "loss.LagVAE.max_elbo": (float, 0., False, "LagVAE bound for KL(q(x, z) || p(x, z))"),
     "loss.LagVAE.max_mmd": (float, 0., False, "LagVAE bound for MMD(q(z) || p(z))"),
