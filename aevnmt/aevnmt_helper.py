@@ -789,7 +789,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
             # Take s importance samples from q(z|x):
             # log int{p(x, y, z) dz} ~= log sum_z{p(x, y, z) / q(z|x)} where z ~ q(z|x)
             batch_size = x_in.size(0)
-            batch_log_marginals = defaultdict(lambda: torch.zeros(n_samples, batch_size))
+            batch_log_marginals = defaultdict(lambda: torch.zeros(n_samples, batch_size, device=x_in.device))
 
             for s in range(n_samples):
 
@@ -832,7 +832,7 @@ def _evaluate_perplexity(model, val_dl, vocab_src, vocab_tgt, device):
 
             for comp_name, log_marginals in batch_log_marginals.items():
                 # Average over all samples.
-                batch_avg = torch.logsumexp(log_marginals, dim=0) - torch.log(torch.Tensor([n_samples]))
+                batch_avg = torch.logsumexp(log_marginals, dim=0) - torch.log(torch.Tensor([n_samples])).to(log_marginals.device)
                 log_marginal[comp_name] = log_marginal[comp_name] + batch_avg.sum().item()
 
             num_sentences += batch_size

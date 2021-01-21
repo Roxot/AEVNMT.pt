@@ -265,12 +265,12 @@ def attention_summary(src_labels, tgt_labels, att_weights, summary_writer, summa
 
    # Configure the columns.
     ax.xaxis.tick_top()
-    ax.set_xticks(np.arange(att_weights.shape[1]))
+    ax.set_xticks(np.arange(att_weights.shape[0]))
     ax.set_xticklabels(tgt_labels, rotation="vertical")
 
     # Configure the rows.
     ax.set_yticklabels(src_labels)
-    ax.set_yticks(np.arange(att_weights.shape[0]))
+    ax.set_yticks(np.arange(att_weights.shape[1]))
 
     # Fit the figure neatly.
     plt.tight_layout()
