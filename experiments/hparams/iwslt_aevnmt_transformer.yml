@@ -1,0 +1,150 @@
+aux:
+  MADE: false
+  MADE_tl: false
+  bow: false
+  bow_tl: false
+  count_MADE: false
+  count_MADE_tl: false
+  hidden_size: 32
+  ibm1: false
+  shuffle_lm: false
+  shuffle_lm_keep_bpe: false
+  shuffle_lm_tl: false
+batch_size: 64
+bpe:
+  merge: true
+criterion: likelihood
+data_parallel: false
+decoding:
+  beam_width: 5
+  length_penalty_factor: 1.0
+  max_length: 50
+  sample: false
+detokenize: false
+draw_translations: 0
+dropout: 0.1
+emb:
+  init_scale: 0.01
+  shared: false
+  size: 512
+evaluate_every: -1
+gen:
+  lm:
+    feed_z: true
+    label_smoothing: 0.0
+    rnn:
+      cell_type: lstm
+      hidden_size: 256
+      num_layers: 1
+    style: transformer
+    tied_embeddings: true
+    transformer:
+      hidden_size: 1024
+      num_heads: 4
+      num_layers: 6
+  opt:
+    l2_weight: 0.0
+    lr: 0.00008
+    lr_min: 1.0e-07
+    lr_reduce_cooldown: 2
+    lr_reduce_factor: 0.5
+    lr_reduce_patience: 3
+    lr_scheduler: reduce_on_plateau
+    lr_warmup: 4000
+    style: adam
+  tm:
+    dec:
+      feed_z: true
+      style: transformer
+      tied_embeddings: true
+    enc:
+      style: transformer
+    label_smoothing: 0.0
+    rnn:
+      attention: bahdanau
+      bidirectional: true
+      cell_type: lstm
+      hidden_size: 256
+      num_layers: 1
+    transformer:
+      hidden_size: 1024
+      num_heads: 4
+      num_layers: 6
+inf:
+  composition: avg
+  conditioning: x
+  inf3: ''
+  inf3_comb_composition: cat
+  opt:
+    l2_weight: 0.0
+    lr: 0.0001
+    lr_min: 1.0e-07
+    lr_reduce_cooldown: 2
+    lr_reduce_factor: 0.5
+    lr_reduce_patience: 3
+    lr_scheduler: reduce_on_plateau
+    lr_warmup: 4000
+    style: adam
+  rnn:
+    bidirectional: true
+    cell_type: lstm
+    hidden_size: 256
+    num_layers: 1
+  style: transformer
+  transformer:
+    hidden_size: 1024
+    num_heads: 4
+    num_layers: 6
+likelihood:
+  mixture: false
+  mixture_dir_prior: 0.0
+loss:
+  ELBO:
+    beta: 1.0
+    free_nats: 0.0
+    kl_annealing_steps: 0
+    mdr: 10.0
+  IWAE:
+    num_samples: 5
+  InfoVAE:
+    alpha: 0.7
+    lamb: 31.5
+  LagVAE:
+    alpha: -1
+    max_elbo: 200.
+    max_mmd: 0.1
+  type: ELBO
+lowercase: true
+max_gradient_norm: 4.0
+max_sentence_length: 50
+model:
+  type: aevnmt
+num_epochs: 50
+patience: 10
+posterior:
+  family: gaussian
+postprocess_ref: false
+print_every: 100
+prior:
+  family: gaussian
+  latent_size: 64
+  latent_sizes: ''
+  params: 0.0 1.0
+recase: false
+show_raw_output: false
+split_sentences: false
+src: de
+subword_token: '@@'
+tgt: en
+tokenize: false
+translation:
+  interactive: 0
+update_freq: 1
+use_gpu: true
+use_memmap: false
+verbose: false
+vocab:
+  max_size: -1
+  min_freq: 0
+  shared: true
+word_dropout: 0.0
