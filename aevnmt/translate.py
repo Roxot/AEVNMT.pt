@@ -248,7 +248,7 @@ class TranslationEngine:
 def main(hparams=None):
     # Load command line hyperparameters (and if provided from an hparams_file).
     if hparams is None:
-        if "--hparams_file" not in sys.argv:
+        if "--help" not in sys.argv and "--hparams_file" not in sys.argv:
             # TODO This is added to prevent incorrect overriding of arguments, see Issue #14
             # When resolved, hparams.update_from_file can be used instead.
             output_dir = Path(sys.argv[sys.argv.index("--output_dir") + 1])

@@ -115,7 +115,7 @@ class Vocabulary:
                          from the vocabulary file.
         """
         vocab = Vocabulary()
-        with open(vocab_file) as f:
+        with open(vocab_file, encoding='ISO-8859-2') as f:
             for line in f:
                 if max_size > 0 and len(vocab.word_to_idx) == max_size+4:
                     break
